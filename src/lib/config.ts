@@ -9,8 +9,19 @@ export const TRIAL_DAYS = Math.max(
 
 export const AUTH_COOKIE = "pharma_session";
 
-export const AUTH_SECRET =
-  process.env.AUTH_SECRET ?? "pharma-dev-secret-change-me-0123456789";
+/**
+ * کلید امضای نشست — فقط در زمان درخواست خوانده می‌شود (نه هنگام build).
+ * مقدار پیش‌فرض وجود ندارد؛ اگر خالی یا کوتاه‌تر از ۳۲ کاراکتر باشد خطا می‌دهد.
+ */
+export function getAuthSecret(): Uint8Array {
+  const value = process.env.AUTH_SECRET;
+  if (!value || value.length < 32) {
+    throw new Error(
+      "AUTH_SECRET تنظیم نشده یا کوتاه‌تر از ۳۲ کاراکتر است؛ نشست قابل امضا/تأیید نیست."
+    );
+  }
+  return new TextEncoder().encode(value);
+}
 
 /** DSN سرویس پایش خطا (Sentry) — خالی = غیرفعال */
 export const SENTRY_DSN =

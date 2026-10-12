@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
-import { AUTH_COOKIE, AUTH_SECRET } from "@/lib/config";
+import { AUTH_COOKIE, getAuthSecret } from "@/lib/config";
 import { AppError, db, type AuthCtx } from "@/db";
 import { users } from "@/db/schema";
 
@@ -13,24 +13,22 @@ export interface SessionPayload {
   email: string;
 }
 
-function secretKey(): Uint8Array {
-  return new TextEncoder().encode(AUTH_SECRET);
-}
-
 export async function signSession(payload: SessionPayload): Promise<string> {
+  const key = getAuthSecret();
   return new SignJWT({ tid: payload.tid, role: payload.role, email: payload.email })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(payload.sub)
     .setIssuedAt()
     .setExpirationTime("30d")
-    .sign(secretKey());
+    .sign(key);
 }
 
 export async function verifySession(
   token: string
 ): Promise<SessionPayload | null> {
+  const key = getAuthSecret(); // خطای صریح در نبود کلید؛ داخل try نیست
   try {
-    const { payload } = await jwtVerify(token, secretKey());
+    const { payload } = await jwtVerify(token, key);
     return {
       sub: payload.sub as string,
       tid: payload.tid as string,
