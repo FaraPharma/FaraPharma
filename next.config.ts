@@ -5,7 +5,10 @@ const nextConfig: NextConfig = {
   // Make sure @opentelemetry/api is fully copied into the traced output
   // (OpenNext/Cloudflare bundling fails to resolve it otherwise).
   outputFileTracingIncludes: {
-    "/*": ["./node_modules/@opentelemetry/api/**/*"],
+    "/*": [
+      "./node_modules/@opentelemetry/api/**/*",
+      "./node_modules/pg-cloudflare/**/*",
+    ],
   },
 };
 
