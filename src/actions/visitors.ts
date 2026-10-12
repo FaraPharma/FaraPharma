@@ -1,0 +1,286 @@
+"use server";
+
+import { eq, and } from "drizzle-orm";
+import { AppError, withTenant } from "@/db";
+import { assertWritable } from "@/db/access";
+import { normalizeUsername } from "@/lib/domain";
+import {
+  visitors,
+  visitorNotes,
+  visitorProducts,
+  visitorProductHistory,
+  products,
+} from "@/db/schema";
+import { requireAuth } from "@/lib/auth";
+import type { ActionResult } from "@/actions/auth";
+
+export async function addVisitorAction(input: {
+  name: string;
+  company?: string;
+  phone?: string;
+  messengerUsername?: string;
+  mainProducts?: string;
+}): Promise<ActionResult> {
+  const ctx = await requireAuth();
+  const name = (input.name ?? "").trim();
+  if (name.length < 2) return { ok: false, error: "نام ویزیتور را وارد کنید" };
+  try {
+    return await withTenant(ctx, async (tx) => {
+      await assertWritable(ctx, tx);
+      const inserted = await tx
+        .insert(visitors)
+        .values({
+          tenantId: ctx.tenantId,
+          name,
+          company: input.company?.trim() || null,
+          phone: input.phone?.trim() || null,
+          messengerUsername: normalizeUsername(
+            input.messengerUsername
+          ) || null,
+        })
+        .returning({ id: visitors.id });
+      const visitorId = inserted[0].id;
+
+      // Quick-add main products: create missing products and link with
+      // default "in stock" conditions.
+      const names = (input.mainProducts ?? "")
+        .split(/[،,;\n]+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .slice(0, 6);
+      for (const pname of names) {
+        const found = await tx
+          .select({ id: products.id })
+          .from(products)
+          .where(and(eq(products.tenantId, ctx.tenantId), eq(products.name, pname)))
+          .limit(1);
+        let productId = found[0]?.id;
+        if (!productId) {
+          const created = await tx
+            .insert(products)
+            .values({
+              tenantId: ctx.tenantId,
+              name: pname,
+              category: "cosmetic",
+            })
+            .returning({ id: products.id });
+          productId = created[0].id;
+        }
+        await tx
+          .insert(visitorProducts)
+          .values({
+            tenantId: ctx.tenantId,
+            visitorId,
+            productId,
+            stock: "in",
+            cashDiscountPct: 0,
+            checkDays: 0,
+          })
+          .onConflictDoNothing();
+      }
+      return { ok: true, id: visitorId };
+    });
+  } catch (e) {
+    if (e instanceof AppError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export async function updateVisitorAction(input: {
+  id: string;
+  name: string;
+  company?: string;
+  phone?: string;
+  messengerUsername?: string;
+}): Promise<ActionResult> {
+  const ctx = await requireAuth();
+  const name = (input.name ?? "").trim();
+  if (name.length < 2) return { ok: false, error: "نام ویزیتور را وارد کنید" };
+  try {
+    await withTenant(ctx, async (tx) => {
+      await assertWritable(ctx, tx);
+      await tx
+        .update(visitors)
+        .set({
+          name,
+          company: input.company?.trim() || null,
+          phone: input.phone?.trim() || null,
+          messengerUsername: normalizeUsername(
+            input.messengerUsername
+          ) || null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(visitors.id, input.id), eq(visitors.tenantId, ctx.tenantId)));
+    });
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof AppError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export async function deleteVisitorAction(id: string): Promise<ActionResult> {
+  const ctx = await requireAuth();
+  try {
+    await withTenant(ctx, async (tx) => {
+      await assertWritable(ctx, tx);
+      await tx
+        .delete(visitors)
+        .where(and(eq(visitors.id, id), eq(visitors.tenantId, ctx.tenantId)));
+    });
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof AppError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export async function addVisitorNoteAction(input: {
+  visitorId: string;
+  body: string;
+}): Promise<ActionResult> {
+  const ctx = await requireAuth();
+  const body = (input.body ?? "").trim();
+  if (!body) return { ok: false, error: "متن یادداشت را وارد کنید" };
+  try {
+    return await withTenant(ctx, async (tx) => {
+      await assertWritable(ctx, tx);
+      const inserted = await tx
+        .insert(visitorNotes)
+        .values({
+          tenantId: ctx.tenantId,
+          visitorId: input.visitorId,
+          body,
+        })
+        .returning({ id: visitorNotes.id });
+      return { ok: true, id: inserted[0].id };
+    });
+  } catch (e) {
+    if (e instanceof AppError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export async function deleteVisitorNoteAction(id: string): Promise<ActionResult> {
+  const ctx = await requireAuth();
+  try {
+    await withTenant(ctx, async (tx) => {
+      await assertWritable(ctx, tx);
+      await tx
+        .delete(visitorNotes)
+        .where(and(eq(visitorNotes.id, id), eq(visitorNotes.tenantId, ctx.tenantId)));
+    });
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof AppError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export async function setConditionAction(input: {
+  visitorId: string;
+  productId: string;
+  stock: string;
+  cashDiscountPct: number;
+  checkDays: number;
+  offer?: string;
+  validUntil?: string;
+  price?: number;
+}): Promise<ActionResult> {
+  const ctx = await requireAuth();
+  try {
+    await withTenant(ctx, async (tx) => {
+      await assertWritable(ctx, tx);
+      const values = {
+        tenantId: ctx.tenantId,
+        visitorId: input.visitorId,
+        productId: input.productId,
+        stock: input.stock,
+        cashDiscountPct: Math.max(0, Math.min(100, Number(input.cashDiscountPct) || 0)),
+        checkDays: Math.max(0, Math.min(365, Number(input.checkDays) || 0)),
+        offer: input.offer?.trim() || null,
+        validUntil: input.validUntil?.trim() ? input.validUntil.trim() : null,
+        price:
+          input.price !== undefined && input.price !== null && input.price > 0
+            ? Math.round(input.price)
+            : null,
+        updatedAt: new Date(),
+      };
+
+      // History snapshot: the previous state of this condition is recorded
+      // (with its timestamp) before the overwrite happens.
+      const previous = await tx
+        .select({
+          stock: visitorProducts.stock,
+          cashDiscountPct: visitorProducts.cashDiscountPct,
+          checkDays: visitorProducts.checkDays,
+          offer: visitorProducts.offer,
+          validUntil: visitorProducts.validUntil,
+          price: visitorProducts.price,
+        })
+        .from(visitorProducts)
+        .where(
+          and(
+            eq(visitorProducts.tenantId, ctx.tenantId),
+            eq(visitorProducts.visitorId, input.visitorId),
+            eq(visitorProducts.productId, input.productId)
+          )
+        )
+        .limit(1);
+      if (previous[0]) {
+        await tx.insert(visitorProductHistory).values({
+          tenantId: ctx.tenantId,
+          visitorId: input.visitorId,
+          productId: input.productId,
+          stock: previous[0].stock,
+          cashDiscountPct: previous[0].cashDiscountPct,
+          checkDays: previous[0].checkDays,
+          offer: previous[0].offer,
+          validUntil: previous[0].validUntil,
+          price: previous[0].price,
+          recordedAt: new Date(),
+        });
+      }
+
+      await tx
+        .insert(visitorProducts)
+        .values(values)
+        .onConflictDoUpdate({
+          target: [
+            visitorProducts.tenantId,
+            visitorProducts.visitorId,
+            visitorProducts.productId,
+          ],
+          set: {
+            stock: values.stock,
+            cashDiscountPct: values.cashDiscountPct,
+            checkDays: values.checkDays,
+            offer: values.offer,
+            validUntil: values.validUntil,
+            price: values.price,
+            updatedAt: values.updatedAt,
+          },
+        });
+    });
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof AppError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
+export async function deleteConditionAction(id: string): Promise<ActionResult> {
+  const ctx = await requireAuth();
+  try {
+    await withTenant(ctx, async (tx) => {
+      await assertWritable(ctx, tx);
+      await tx
+        .delete(visitorProducts)
+        .where(and(eq(visitorProducts.id, id), eq(visitorProducts.tenantId, ctx.tenantId)));
+    });
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof AppError) return { ok: false, error: e.message };
+    throw e;
+  }
+}

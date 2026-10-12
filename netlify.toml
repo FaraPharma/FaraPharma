@@ -1,0 +1,23 @@
+# تنظیمات دیپلوی Netlify برای Next.js
+# Netlify پروژههای Next.js را خودکار تشخیص میدهد و از Runtime رسمی
+# (@netlify/plugin-nextjs) استفاده میکند — این فایل فقط مقادیر را صریح میکند.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  # Next.js 16 به Node 20.9+ نیاز دارد
+  NODE_VERSION = "22"
+
+# ─────────────────────────────────────────────────────────────────────
+# Netlify Scheduled Function — یادآوری چکهای نزدیک سررسید
+# هر روز ساعت ۰۹:۰۰ (UTC) اجرا میشود ≈ ۱۲:۳۰ تهران (با توجه به منطقه)
+# ─────────────────────────────────────────────────────────────────────
+[functions."cheque-reminders"]
+  schedule = "0 9 * * *"
+
+# اگر خواستید پاسخ API ها را در یک سرور اختصاصی (بهجای serverless) اجرا کنید
+# این بخش را فعال کنید؛ برای شروع لازم نیست.
+# [plugins]
+#   package = "@netlify/plugin-nextjs"

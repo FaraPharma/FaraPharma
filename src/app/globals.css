@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Vazirmatn", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Tahoma, sans-serif;
+}
+
+/* ===== توکن‌های سیستم طراحی — نسخه‌ی روشن، الهام از داروخانه ===== */
+:root {
+  --ink: #241D17;
+  --ink-soft: #9C8F81;
+  --bg: #F8F4EC;
+  --surface: #FFFFFF;
+  --line: #F0E7DA;
+  --danger: #F0562F;
+
+  --teal-1: #12AC93;
+  --teal-2: #0A7C6B;
+  --cobalt-1: #3763C9;
+  --cobalt-2: #1B3B84;
+  --coral-1: #FF8B6B;
+  --coral-2: #F0562F;
+  --violet-1: #8C7CF6;
+  --violet-2: #5E4BC7;
+  --amber-1: #F6C15E;
+  --amber-2: #E08A1E;
+  --gold: #D8A94A;
+
+  --mint-soft: #E3F7F1;
+  --coral-soft: #FFEDE6;
+  --violet-soft: #EFEBFD;
+  --amber-soft: #FDF3DF;
+
+  --icon-shadow: 0 6px 14px rgba(90, 55, 20, 0.15);
+}
+
+html {
+  direction: rtl;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background-color: var(--bg);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* لایه‌ی پس‌زمینه‌ی صفحه: کرم روشن + سه هاله‌ی نرم آبرنگی، به‌اندازه نه پررنگ */
+body {
+  background-image:
+    radial-gradient(280px 220px at 92% -6%, rgba(255, 139, 107, 0.10), transparent 60%),
+    radial-gradient(240px 240px at 2% 18%, rgba(140, 124, 246, 0.08), transparent 60%),
+    radial-gradient(280px 260px at 100% 60%, rgba(18, 172, 147, 0.10), transparent 60%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+:where(h1, h2, h3, .font-bold, .font-extrabold, .font-black, strong) {
+  letter-spacing: -0.01em;
+}
+
+/* کارت: سفید با سایه‌ی ملایم گرم */
+.card {
+  @apply rounded-3xl;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  box-shadow: 0 6px 18px rgba(90, 55, 20, 0.06);
+}
+
+.field-label {
+  @apply mb-1.5 block text-xs font-medium;
+  color: var(--ink-soft);
+}
+
+.field-input {
+  @apply w-full rounded-2xl px-3 py-2.5 text-sm outline-none transition;
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  color: var(--ink);
+}
+.field-input::placeholder {
+  color: var(--ink-soft);
+}
+.field-input:focus {
+  border-color: var(--teal-1);
+  box-shadow: 0 0 0 3px rgba(18, 172, 147, 0.15);
+}
+
+/* دکمه اصلی: گرادیان سبز زمردی */
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-bold transition active:scale-[0.98] disabled:opacity-50;
+  background: linear-gradient(135deg, var(--teal-1), var(--teal-2));
+  color: #ffffff;
+  box-shadow: 0 8px 20px rgba(18, 172, 147, 0.28);
+}
+
+/* دکمه CTA مهم: گرادیان کهربایی گرم */
+.btn-accent {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-bold transition active:scale-[0.98] disabled:opacity-50;
+  background: linear-gradient(135deg, var(--amber-1), var(--amber-2));
+  color: #2E1A02;
+  box-shadow: var(--icon-shadow);
+}
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-medium transition active:scale-[0.98] disabled:opacity-50;
+  background: var(--surface);
+  border: 1.5px solid var(--line);
+  color: var(--ink);
+}
+
+.btn-danger {
+  @apply inline-flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-bold text-white transition active:scale-[0.98] disabled:opacity-50;
+  background: var(--danger);
+  box-shadow: 0 6px 14px rgba(240, 86, 47, 0.28);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
