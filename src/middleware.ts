@@ -1,8 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
-import { AUTH_COOKIE, AUTH_SECRET } from "@/lib/config";
-
-const secret = new TextEncoder().encode(AUTH_SECRET);
+import { AUTH_COOKIE, getAuthSecret } from "@/lib/config";
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -16,6 +14,8 @@ export async function middleware(request: NextRequest) {
   };
 
   if (!token) return toLogin();
+
+  const secret = getAuthSecret(); // خطای صریح در نبود کلید؛ داخل try نیست
 
   try {
     const { payload } = await jwtVerify(token, secret);
