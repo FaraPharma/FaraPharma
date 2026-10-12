@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+tsconfig.tsbuildinfo
+
+# Environment secrets — هرگز commit نشود!
+.env
+.env.local
+.env.*.local
+
+# Local file storage (فایلهای کاتالوگ در محیط لوکال)
+storage/
+
+# Logs
+*.log
+/tmp/
+
+# Misc
+.DS_Store
+.vercel
+.netlify
+
+# Cloudflare / OpenNext
+.open-next/
+.wrangler/
+.dev.vars
