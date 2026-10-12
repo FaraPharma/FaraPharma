@@ -51,11 +51,11 @@ drag & drop زیپ کار نمی‌کند؛ از مسیر Git → Netlify است
 ### DATABASE_URL — **الزامی — حتماً Session Pooler**
 
 ```
-postgresql://postgres.qnntjlkgfrxcgkgtowvu:parali3211233@aws-1-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=no-verify
+<PASTE_HERE>
 ```
 
 ⚠️ از **Direct Connection** استفاده نکنید:
-`db.qnntjlkgfrxcgkgtowvu.supabase.co` فقط به IPv6 resolve می‌شود و Netlify
+`db.<PROJECT_REF>.supabase.co` فقط به IPv6 resolve می‌شود و Netlify
 (شبکه IPv4-only) به آن وصل نمی‌شود — دیپلوی قبلی دقیقاً به همین دلیل خطا
 داد. آدرس بالا Session Pooler رسمی Supabase است (IPv4، همان دیتابیس،
 همان کاربر و رمز).
@@ -63,7 +63,7 @@ postgresql://postgres.qnntjlkgfrxcgkgtowvu:parali3211233@aws-1-eu-west-1.pooler.
 ### AUTH_SECRET — **الزامی — مقدار جدید (قدیمی افشا شده، استفاده نکنید)**
 
 ```
-eed4485445998596bc0a0732cf4787bac031ad7d03f289388335c3679bc2ebbb8f983349b500a2a784da739b50126847
+<PASTE_HERE>
 ```
 
 این کلید تازه تولید شده و با هیچ‌جا به‌اشتراک گذاشته نشده است. دقت کنید
@@ -79,8 +79,8 @@ eed4485445998596bc0a0732cf4787bac031ad7d03f289388335c3679bc2ebbb8f983349b500a2a7
 | `SENTRY_DSN` | اختیاری (توصیهشده) | DSN پروژه Sentry (پلن رایگان) — خطاهای سمت سرور را گزارش میدهد |
 | `NEXT_PUBLIC_SENTRY_DSN` | اختیاری | همان DSN برای خطاهای سمت کلاینت (در Sentry بگویید «I'll set it up later» تا کلید عمومی بدهد) |
 | `SENTRY_ORG` / `SENTRY_PROJECT` | اختیاری | فقط برای upload source maps در CI لازم است؛ برای شروع لازم نیست |
-| `VAPID_PUBLIC_KEY` | اختیاری (برای یادآوری push) | `BKfY47GwxyamEz0sBkDF_cS_P8RzPlSq6L8QEQj1y3dXtLhZZlIrNgltmlQfGj_0nYUvbYX3NZ6Up9dM3vrZGl0` |
-| `VAPID_PRIVATE_KEY` | اختیاری (برای یادآوری push) | `p_kGDLc9nWUz97qKWPp6dhY6FhDfBFRFOqfmqZKtxiU` |
+| `VAPID_PUBLIC_KEY` | اختیاری (برای یادآوری push) | `<PASTE_HERE>` |
+| `VAPID_PRIVATE_KEY` | اختیاری (برای یادآوری push) | `<PASTE_HERE>` |
 
 با ست شدن این دو کلید، «یادآوری چک‌ها» به Web Push واقعی ارتقا می‌یابد:
 کاربر در صفحه چک‌ها مجوز می‌دهد → اشتراک push در دیتابیس ذخیره می‌شود →
@@ -100,9 +100,9 @@ eed4485445998596bc0a0732cf4787bac031ad7d03f289388335c3679bc2ebbb8f983349b500a2a7
 فایل `netlify/functions/cheque-reminders/cheque-reminders.ts` پس از deploy
 خودکار در دسترس است. برای تست دستی، به مسیر
 `https://SITE.netlify.app/.netlify/functions/cheque-reminders` درخواست بزنید.
-| `S3_ENDPOINT` | اختیاری | `https://qnntjlkgfrxcgkgtowvu.supabase.co/storage/v1/s3` |
+| `S3_ENDPOINT` | اختیاری | `https://<PROJECT_REF>.supabase.co/storage/v1/s3` |
 | `S3_BUCKET` | اختیاری | نام باکت در Supabase Storage |
-| `S3_ACCESS_KEY` | اختیاری | ref پروژه (`qnntjlkgfrxcgkgtowvu`) |
+| `S3_ACCESS_KEY` | اختیاری | <PASTE_HERE> |
 | `S3_SECRET_KEY` | اختیاری | service_role key از Supabase → Settings → API |
 
 بدون S3، بخش «کاتالوگ PDF» روی Netlify فایل‌ها را بعد از مدتی از دست

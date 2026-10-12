@@ -6,11 +6,6 @@ node_modules/
 out/
 tsconfig.tsbuildinfo
 
-# Environment secrets — هرگز commit نشود!
-.env
-.env.local
-.env.*.local
-
 # Local file storage (فایلهای کاتالوگ در محیط لوکال)
 storage/
 
@@ -26,4 +21,11 @@ storage/
 # Cloudflare / OpenNext
 .open-next/
 .wrangler/
+
+# Environment files — هرگز commit نشود
+.env
+.env.*
+!.env.example
+*.env
 .dev.vars
+.dev.vars.*
