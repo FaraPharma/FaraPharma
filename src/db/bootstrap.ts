@@ -633,8 +633,6 @@ function rlsDdl(tables: string[]): string {
   return parts.join("\n");
 }
 
-let bootstrapPromise: Promise<void> | null = null;
-
 async function runBootstrap(): Promise<void> {
   await pool.query(TABLES_DDL);
   await pool.query(MIGRATIONS_DDL);
@@ -737,14 +735,57 @@ async function runBootstrap(): Promise<void> {
   }
 }
 
-/** Run (once per process) the idempotent DDL + RLS bootstrap. */
-export function ensureDb(): Promise<void> {
-  if (!bootstrapPromise) {
-    bootstrapPromise = runBootstrap().catch((e) => {
-      bootstrapPromise = null;
-      console.error("[bootstrap] failed", e);
-      throw e;
-    });
+/**
+ * آیا اسکیما و سیاست‌های RLS از قبل آماده‌اند؟ (فقط خواندن؛ بدون DDL)
+ * اگر بله، بوت‌استرپ سنگین (DROP/CREATE POLICY روی همه‌ی جدول‌ها) اجرا نمی‌شود.
+ */
+async function isBootstrapped(): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT
+       (SELECT count(*)::int FROM pg_tables
+          WHERE schemaname = 'public'
+            AND tablename::text = ANY($1::text[])) AS tables,
+       (SELECT count(*)::int FROM pg_policies
+          WHERE schemaname = 'public'
+            AND tablename::text = ANY($1::text[])
+            AND policyname::text = tablename::text || '_tenant_policy') AS policies,
+       to_regclass('public.users') IS NOT NULL AS has_users,
+       to_regclass('public.profiles') IS NOT NULL AS has_profiles,
+       to_regclass('public.base_products') IS NOT NULL AS has_base_products`,
+    [TENANT_TABLES]
+  );
+  const r = rows[0];
+  return (
+    !!r &&
+    r.has_users === true &&
+    r.has_profiles === true &&
+    r.has_base_products === true &&
+    Number(r.tables) > 0 &&
+    Number(r.policies) === Number(r.tables)
+  );
+}
+
+// فقط نتیجه‌ی موفق (boolean) بین درخواست‌ها نگه داشته می‌شود؛ Promise مشترک
+// بین درخواست‌ها روی Workers باعث گیر کردن می‌شود.
+let bootstrapped = false;
+
+/**
+ * بوت‌استرپ فقط وقتی اجرا می‌شود که اسکیما آماده نباشد (یا
+ * FORCE_DB_BOOTSTRAP=1). پس از اولین موفقیت، دیگر هیچ کوئری‌ای نمی‌زند.
+ */
+export async function ensureDb(): Promise<void> {
+  if (bootstrapped) return;
+  try {
+    if (process.env.FORCE_DB_BOOTSTRAP === "1" || !(await isBootstrapped())) {
+      console.log("[bootstrap] schema not ready — running bootstrap");
+      await runBootstrap();
+    }
+    bootstrapped = true;
+  } catch (e) {
+    console.error(
+      "[bootstrap] failed:",
+      e instanceof Error ? e.message : String(e)
+    );
+    throw e;
   }
-  return bootstrapPromise;
 }
