@@ -24,7 +24,44 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export type ActionResult = { ok: boolean; error?: string; id?: string };
 
+const ACTION_TIMEOUT_MS = 15_000;
+const GENERIC_ERROR = "مشکلی پیش آمد. لطفاً چند لحظه بعد دوباره تلاش کنید.";
+
+/** خطاهای غیرمنتظره را لاگ می‌کند، timeout ۱۵ ثانیه دارد و همیشه جواب برمی‌گرداند. */
+async function guarded(
+  name: string,
+  fn: () => Promise<ActionResult>
+): Promise<ActionResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`timeout after ${ACTION_TIMEOUT_MS}ms`)),
+          ACTION_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } catch (e) {
+    console.error(`[${name}] failed:`, e);
+    if (e instanceof AppError) return { ok: false, error: e.message };
+    return { ok: false, error: GENERIC_ERROR };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function registerAction(input: {
+  pharmacyName: string;
+  phone?: string;
+  email: string;
+  password: string;
+}): Promise<ActionResult> {
+  return guarded("registerAction", () => registerImpl(input));
+}
+
+async function registerImpl(input: {
   pharmacyName: string;
   phone?: string;
   email: string;
@@ -73,6 +110,13 @@ export async function registerAction(input: {
 }
 
 export async function loginAction(input: {
+  email: string;
+  password: string;
+}): Promise<ActionResult> {
+  return guarded("loginAction", () => loginImpl(input));
+}
+
+async function loginImpl(input: {
   email: string;
   password: string;
 }): Promise<ActionResult> {
