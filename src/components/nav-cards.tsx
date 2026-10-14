@@ -4,9 +4,8 @@ import Link from "next/link";
 import type { ComponentType } from "react";
 
 /**
- * کارت‌های ناوبری اصلی — سبک داشبورد روشن:
- * کارت surface گردگوشه با سایه‌ی گرم ملایم، آیکون خطی داخل مربعِ گرادیانی،
- * عنوان درشت تیره و توضیح کم‌رنگ. کارت «سفارش فوری» به‌عمد کم‌رنگ‌تر و
+ * کارت‌های ناوبری اصلی — کارت سفید، آیکون خطی تک‌رنگ داخل مربع کم‌رنگ،
+ * عنوان تیره و توضیح کم‌رنگ. کارت «سفارش فوری» به‌عمد کم‌رنگ‌تر و
  * خط‌چین است چون مسیر استثناست، نه گردش‌کار روزمره.
  */
 
@@ -90,6 +89,15 @@ export function IconGear({ className }: IconProps) {
     </svg>
   );
 }
+export function IconHome({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} {...stroke}>
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 9.5V21h14V9.5" />
+      <path d="M9.5 21v-6h5v6" />
+    </svg>
+  );
+}
 export function IconClock({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" className={className} {...stroke}>
@@ -100,18 +108,19 @@ export function IconClock({ className }: IconProps) {
 }
 
 /**
- * گرادیان‌های برند برای آیکون‌های ناوبری — هرکدوم یک آیکون رنگی اختصاصی
- * با سایه‌ی گرم می‌سازند. تن «urgent» استثناست: کم‌رنگ و خط‌چین، چون
- * مسیر سفارش فوری باید عمداً کمتر دعوت‌کننده باشد.
+ * همه‌ی کارت‌ها تک‌رنگ‌اند (رنگ اصلی). تن «urgent» تنها استثنای معنایی است:
+ * قرمز کم‌رنگ و خط‌چین، چون مسیر سفارش فوری باید عمداً کمتر دعوت‌کننده باشد.
+ * کلیدهای تن برای سازگاری با صفحه‌ها نگه داشته شده‌اند.
  */
+const PRIMARY_TONE = "bg-[color:var(--primary-soft)] text-[color:var(--primary-dark)]";
 const TONES = {
-  violet: "bg-[linear-gradient(145deg,#8C7CF6,#5E4BC7)]",
-  emerald: "bg-[linear-gradient(145deg,#12AC93,#0A7C6B)]",
-  amber: "bg-[linear-gradient(145deg,#F6C15E,#E08A1E)]",
-  pink: "bg-[linear-gradient(145deg,#FF8B6B,#F0562F)]",
-  cobalt: "bg-[linear-gradient(145deg,#3763C9,#1B3B84)]",
-  muted: "bg-[linear-gradient(145deg,#B9C0CC,#7C8698)]",
-  urgent: "bg-[color:var(--coral-soft)]",
+  violet: PRIMARY_TONE,
+  emerald: PRIMARY_TONE,
+  amber: PRIMARY_TONE,
+  pink: PRIMARY_TONE,
+  cobalt: PRIMARY_TONE,
+  muted: PRIMARY_TONE,
+  urgent: "bg-[color:var(--danger-soft)] text-[color:var(--danger-ink)]",
 } as const;
 
 export type NavTone = keyof typeof TONES;
@@ -147,15 +156,15 @@ export function NavCard({ href, title, desc, tone, Icon }: NavCardDef) {
     return (
       <Link
         href={href}
-        className="flex flex-col gap-3 rounded-3xl border-[1.5px] border-dashed p-4 transition active:scale-[0.98]"
-        style={{ borderColor: "rgba(240,86,47,.35)", background: "var(--coral-soft)" }}
+        className="flex min-h-11 flex-col gap-3 rounded-2xl border-[1.5px] border-dashed p-4 transition active:scale-[0.98]"
+        style={{ borderColor: "var(--danger)", background: "var(--danger-soft)" }}
       >
-        <div className="grid size-11 place-items-center rounded-2xl text-[#C43F1D]" style={{ background: "rgba(240,86,47,.14)" }}>
+        <div className={`grid size-11 place-items-center rounded-2xl ${TONES.urgent}`}>
           <Icon className="size-6" />
         </div>
         <div>
-          <div className="text-sm font-bold text-[#C43F1D]">{title}</div>
-          <div className="mt-0.5 text-[11px] leading-4 text-[#8A3A22]">{desc}</div>
+          <div className="text-sm font-bold text-[color:var(--danger-ink)]">{title}</div>
+          <div className="mt-0.5 text-[11px] leading-4 text-[color:var(--danger-ink)]">{desc}</div>
         </div>
       </Link>
     );
@@ -163,11 +172,9 @@ export function NavCard({ href, title, desc, tone, Icon }: NavCardDef) {
   return (
     <Link
       href={href}
-      className="card flex flex-col gap-3 p-4 transition active:scale-[0.98]"
+      className="card flex min-h-11 flex-col gap-3 p-4 transition active:scale-[0.98]"
     >
-      <div
-        className={`grid size-11 place-items-center rounded-2xl text-white shadow-[var(--icon-shadow)] ${TONES[tone]}`}
-      >
+      <div className={`grid size-11 place-items-center rounded-2xl ${TONES[tone]}`}>
         <Icon className="size-6" />
       </div>
       <div>
