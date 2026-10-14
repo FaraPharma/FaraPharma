@@ -20,7 +20,7 @@ interface SearchResults {
  * جستجوی سراسری — از هر صفحه‌ای در دسترس است. فقط بازیابی اطلاعات؛
  * هیچ تحلیلی انجام نمی‌شود، فقط نتیجه نشان داده می‌شود.
  */
-export function GlobalSearch() {
+export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResults | null>(null);
@@ -61,17 +61,32 @@ export function GlobalSearch() {
 
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        aria-label="جستجوی سراسری"
-        className="grid size-8 place-items-center rounded-full text-white transition active:scale-95"
-        style={{ background: "rgba(255,255,255,.2)" }}
-      >
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-          <circle cx="10.5" cy="10.5" r="6.5" />
-          <path d="M20 20l-4.5-4.5" />
-        </svg>
-      </button>
+      {variant === "field" ? (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="جستجوی سراسری"
+          className="field-input flex w-full items-center gap-2 text-start"
+          style={{ color: "var(--ink-soft)" }}
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="M20 20l-4.5-4.5" />
+          </svg>
+          <span className="text-sm">جستجو در ویزیتورها، کالاها، یادداشت‌ها…</span>
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="جستجوی سراسری"
+          className="grid size-11 place-items-center rounded-full transition active:scale-95"
+          style={{ background: "var(--primary-soft)", color: "var(--primary-dark)" }}
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="M20 20l-4.5-4.5" />
+          </svg>
+        </button>
+      )}
 
       {open && (
         <div

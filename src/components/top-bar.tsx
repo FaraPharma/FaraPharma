@@ -6,8 +6,7 @@ import { APP_NAME } from "@/lib/config";
 import { GlobalSearch } from "@/components/global-search";
 
 /**
- * نوار بالای برند — گرادیان فیروزه‌ای به لاجوردی، با یک نوار نازک کاشی‌مانند
- * زیرش (الهام از کاشی‌کاری ایرانی، به‌اندازه نه پررنگ). دسترسی همیشگی به داشبورد.
+ * نوار بالای ساده — سطح سفید با خط نازک زیرش؛ دسترسی همیشگی به داشبورد.
  */
 export function TopBar() {
   const pathname = usePathname();
@@ -21,34 +20,23 @@ export function TopBar() {
   const isHome = pathname === "/dashboard";
 
   return (
-    <header className="sticky top-0 z-40">
-      <div
-        className="flex h-12 items-center justify-between px-4"
-        style={{
-          background:
-            "linear-gradient(120deg, var(--teal-1) 0%, var(--teal-2) 45%, var(--cobalt-2) 100%)",
-        }}
-      >
+    <header
+      className="sticky top-0 z-40 border-b"
+      style={{ background: "var(--surface)", borderColor: "var(--line)" }}
+    >
+      <div className="flex min-h-14 items-center px-4">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between">
           <div className="flex items-center gap-2">
-            <img
-              src="/icons/icon-512.png"
-              alt=""
-              className="size-6 rounded-lg shadow-sm"
-            />
-            <span className="text-xs font-bold text-white">{APP_NAME}</span>
+            <img src="/icons/icon-512.png" alt="" className="size-7 rounded-lg" />
+            <span className="text-sm font-bold text-[color:var(--ink)]">{APP_NAME}</span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <GlobalSearch />
+          <div className="flex items-center gap-2">
+            {!isHome && <GlobalSearch />}
             {!isHome && (
               <Link
                 href="/dashboard"
-                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-bold transition active:scale-[0.98]"
-                style={{
-                  background: "linear-gradient(135deg,#F6C15E,#E08A1E)",
-                  color: "#2E1A02",
-                  boxShadow: "0 6px 14px rgba(90,55,20,.25)",
-                }}
+                className="flex min-h-11 items-center gap-1.5 rounded-full px-4 text-xs font-bold transition active:scale-[0.98]"
+                style={{ background: "var(--primary-soft)", color: "var(--primary-dark)" }}
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -69,15 +57,6 @@ export function TopBar() {
           </div>
         </div>
       </div>
-      {/* نوار نازک کاشی‌مانند — امضای بصری، نه دکور اضافه */}
-      <div
-        className="h-[3px] w-full"
-        style={{
-          background:
-            "repeating-linear-gradient(90deg, var(--teal-1) 0 14px, var(--gold) 14px 16px, var(--cobalt-1) 16px 30px, var(--gold) 30px 32px)",
-          opacity: 0.8,
-        }}
-      />
     </header>
   );
 }
