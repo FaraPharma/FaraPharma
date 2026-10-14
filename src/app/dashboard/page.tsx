@@ -1,18 +1,30 @@
 "use client";
 
 import Link from "next/link";
+import type { ComponentType, ReactNode } from "react";
 import { useOfflineData } from "@/hooks/useOfflineData";
-import { OfflineBadge } from "@/components/offline-badge";
+import { PageHeader, Spinner, Button } from "@/components/ui";
 import {
-  PageHeader,
-  Spinner,
-  EmptyState,
-  Button,
-} from "@/components/ui";
-import { NavGrid, IconAlert, IconCard, IconNote, IconBox } from "@/components/nav-cards";
-import { SubscriptionBanner } from "@/components/sub-banner";
-import { TRIAL_DAYS } from "@/lib/config";
-import { compactToman, faDate, faDateTime, faNum } from "@/lib/format";
+  IconUsers,
+  IconBox,
+  IconBanknote,
+  IconCard,
+  IconAlert,
+  IconNote,
+  IconClock,
+  IconGear,
+} from "@/components/nav-cards";
+import { GlobalSearch } from "@/components/global-search";
+import {
+  compactToman,
+  daysLeft,
+  effectiveStatus,
+  faDate,
+  faDateTime,
+  faNum,
+} from "@/lib/format";
+
+type IconType = ComponentType<{ className?: string }>;
 
 interface DashboardData {
   profile: {
@@ -66,270 +78,353 @@ interface DashboardData {
   }>;
 }
 
+function Chevron() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="size-4 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ color: "var(--ink-soft)" }}
+      aria-hidden="true"
+    >
+      <path d="M15 6l-6 6 6 6" />
+    </svg>
+  );
+}
+
+function IconRefresh({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 12a8 8 0 1 1-2.3-5.7" />
+      <path d="M20 4v5h-5" />
+    </svg>
+  );
+}
+
+/** کارت بزرگ: آیکون، عدد و عنوان */
+function BigCard({
+  href,
+  title,
+  value,
+  Icon,
+}: {
+  href: string;
+  title: string;
+  value: number;
+  Icon: IconType;
+}) {
+  return (
+    <Link
+      href={href}
+      className="card flex min-h-28 flex-col justify-between p-4 transition active:scale-[0.98]"
+    >
+      <div className="flex items-start justify-between">
+        <div
+          className="grid size-11 place-items-center rounded-2xl"
+          style={{ background: "var(--primary-soft)", color: "var(--primary)" }}
+        >
+          <Icon className="size-6" />
+        </div>
+        <div className="tnum text-2xl font-extrabold" style={{ color: "var(--ink)" }}>
+          {faNum(value)}
+        </div>
+      </div>
+      <div className="text-sm font-bold" style={{ color: "var(--ink)" }}>
+        {title}
+      </div>
+    </Link>
+  );
+}
+
+/** یک ردیف هشدار کهربایی */
+function AlertRow({
+  href,
+  Icon,
+  title,
+  desc,
+}: {
+  href?: string;
+  Icon: IconType;
+  title: string;
+  desc?: ReactNode;
+}) {
+  const inner = (
+    <>
+      <div
+        className="grid size-9 shrink-0 place-items-center rounded-xl"
+        style={{ background: "var(--surface)", color: "var(--warning-ink)" }}
+      >
+        <Icon className="size-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-bold" style={{ color: "var(--warning-ink)" }}>
+          {title}
+        </div>
+        {desc ? (
+          <div className="tnum truncate text-[11px]" style={{ color: "var(--warning-ink)" }}>
+            {desc}
+          </div>
+        ) : null}
+      </div>
+      {href ? <Chevron /> : null}
+    </>
+  );
+  const cls = "flex min-h-14 items-center gap-3 px-4 py-2.5";
+  return href ? (
+    <Link href={href} className={cls}>
+      {inner}
+    </Link>
+  ) : (
+    <div className={cls}>{inner}</div>
+  );
+}
+
+/** پیام وضعیت (اشتراک / آفلاین) — فقط وقتی هشدار دارد */
+function Notice({
+  tone,
+  children,
+}: {
+  tone: "warning" | "danger";
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-2xl px-4 py-3 text-xs font-medium leading-5"
+      style={{
+        background: `var(--${tone}-soft)`,
+        color: `var(--${tone === "warning" ? "warning" : "danger"}-ink)`,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { data, error, loading, stale, savedAt, reload } =
     useOfflineData<DashboardData>("/api/dashboard");
 
-  if (loading && !data) return <Spinner />;
+  if (loading && !data) {
+    return (
+      <div className="py-10 text-center">
+        <Spinner />
+        <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
+          در حال بارگذاری…
+        </p>
+      </div>
+    );
+  }
 
-  const overdue = data?.cheques?.overdueCount ?? 0;
-  const upcoming = data?.cheques?.upcomingCount ?? 0;
-  const shortages = data?.counts.shortages ?? 0;
-  const lowStock = data?.lowStockCount ?? 0;
-  const notesCount = data?.quickNotes?.length ?? 0;
-  const nothingUrgent =
-    overdue === 0 && upcoming === 0 && shortages === 0 && lowStock === 0;
+  if (!data) {
+    return (
+      <div className="card space-y-3 p-5 text-center">
+        <p className="text-sm font-bold" style={{ color: "var(--ink)" }}>
+          دریافت اطلاعات ممکن نشد
+        </p>
+        <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
+          {error ?? "اتصال را بررسی کنید و دوباره تلاش کنید."}
+        </p>
+        <Button variant="primary" onClick={() => reload()}>
+          تلاش دوباره
+        </Button>
+      </div>
+    );
+  }
+
+  const counts = data.counts;
+  const overdue = data.cheques?.overdueCount ?? 0;
+  const upcoming = data.cheques?.upcomingCount ?? 0;
+  const lowStock = data.lowStockCount ?? 0;
+  const offers = data.expiringOffers ?? [];
+  const notesCount = data.quickNotes?.length ?? 0;
+  const subStatus = data.profile ? effectiveStatus(data.profile) : "active";
+  const trialLeft = data.profile ? daysLeft(data.profile.trialEndsAt) : null;
+
+  const hasAlerts =
+    overdue > 0 || upcoming > 0 || counts.shortages > 0 || lowStock > 0 || offers.length > 0;
+  const isEmpty =
+    counts.products === 0 &&
+    counts.visitors === 0 &&
+    counts.openOrders === 0 &&
+    counts.openRequests === 0 &&
+    counts.shortages === 0 &&
+    overdue === 0 &&
+    upcoming === 0 &&
+    notesCount === 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <PageHeader
-        title={data?.profile?.name ?? "داشبورد"}
-        subtitle="خلاصه‌ی امروز"
+        title={data.profile?.name ?? "داشبورد"}
+        subtitle={faDate(new Date())}
         action={
-          <Button variant="secondary" onClick={() => reload()} className="px-3 py-2 text-xs">
-            ⟳ بروزرسانی
+          <Button
+            variant="secondary"
+            onClick={() => reload()}
+            aria-label="بروزرسانی"
+            className="px-3 py-2 text-xs"
+          >
+            <IconRefresh className="size-4" />
+            بروزرسانی
           </Button>
         }
       />
 
-      <SubscriptionBanner profile={data?.profile ?? null} trialDays={data?.trialDays ?? TRIAL_DAYS} />
+      <GlobalSearch variant="field" />
 
-      {error && (
-        <p className="rounded-xl bg-[color:var(--amber-soft)] px-3 py-2 text-xs font-medium text-[color:#8A5A0E]">
-          ⚠️ {error}
-        </p>
+      {(subStatus !== "active" || error || stale) && (
+        <div className="space-y-2">
+          {subStatus === "expired" && (
+            <Notice tone="danger">
+              اشتراک منقضی شده است؛ مشاهده و خروجی‌گیری فعال است اما ثبت و ویرایش غیرفعال شده.
+              برای تمدید با پشتیبانی تماس بگیرید.
+            </Notice>
+          )}
+          {subStatus === "trial" && (
+            <Notice tone="warning">
+              دوره آزمایشی
+              {trialLeft !== null && trialLeft > 0
+                ? ` — ${faNum(trialLeft)} روز باقی مانده`
+                : " در حال پایان است"}
+            </Notice>
+          )}
+          {error && <Notice tone="warning">{error}</Notice>}
+          {stale && (
+            <Notice tone="warning">
+              نمایش داده‌ی آفلاین
+              {savedAt ? ` — آخرین بروزرسانی: ${faDateTime(new Date(savedAt))}` : ""}
+            </Notice>
+          )}
+        </div>
       )}
 
-      <OfflineBadge stale={stale} savedAt={savedAt} />
-
-      {/* ===== نیاز به توجه — اولویت واقعی امروز، نه آمار خشک ===== */}
-      <section>
-        <h2 className="mb-2.5 text-sm font-bold" style={{ color: "var(--ink-soft)" }}>
-          نیاز به توجه
-        </h2>
-
-        <div className="space-y-2">
-          {overdue > 0 && (
-            <Link
-              href="/cheques"
-              className="card flex items-center gap-3 border-r-[3px] p-3.5"
-              style={{ borderRightColor: "var(--coral-2, #F0562F)" }}
-            >
-              <div
-                className="grid size-9 shrink-0 place-items-center rounded-xl"
-                style={{ background: "var(--coral-soft)", color: "#C43F1D" }}
-              >
-                <IconCard className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>
-                  {faNum(overdue)} چک سررسید گذشته
-                </div>
-                <div className="tnum text-[11px]" style={{ color: "var(--ink-soft)" }}>
-                  جمعاً {compactToman(data?.cheques.overdueTotal ?? 0)} — نیاز به پیگیری فوری
-                </div>
-              </div>
-              <span style={{ color: "var(--ink-soft)" }}>‹</span>
-            </Link>
-          )}
-
-          {upcoming > 0 && (
-            <Link
-              href="/cheques"
-              className="card flex items-center gap-3 border-r-[3px] p-3.5"
-              style={{ borderRightColor: "var(--amber-2, #E08A1E)" }}
-            >
-              <div
-                className="grid size-9 shrink-0 place-items-center rounded-xl"
-                style={{ background: "var(--amber-soft)", color: "#8A5A0E" }}
-              >
-                <IconCard className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>
-                  {faNum(upcoming)} چک تا ۷ روز آینده سررسید دارد
-                </div>
-                <div className="tnum text-[11px]" style={{ color: "var(--ink-soft)" }}>
-                  جمعاً {compactToman(data?.cheques.upcomingTotal ?? 0)}
-                </div>
-              </div>
-              <span style={{ color: "var(--ink-soft)" }}>‹</span>
-            </Link>
-          )}
-
-          {shortages > 0 && (
-            <Link
-              href="/shortages"
-              className="card flex items-center gap-3 border-r-[3px] p-3.5"
-              style={{ borderRightColor: "var(--violet-2, #5E4BC7)" }}
-            >
-              <div
-                className="grid size-9 shrink-0 place-items-center rounded-xl"
-                style={{ background: "var(--violet-soft)", color: "#5E4BC7" }}
-              >
-                <IconAlert className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>
-                  {faNum(shortages)} کالای کسری ثبت شده
-                </div>
-                <div className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
-                  نیاز به پیگیری با ویزیتور
-                </div>
-              </div>
-              <span style={{ color: "var(--ink-soft)" }}>‹</span>
-            </Link>
-          )}
-
-          {lowStock > 0 && (
-            <Link
-              href="/products"
-              className="card flex items-center gap-3 border-r-[3px] p-3.5"
-              style={{ borderRightColor: "var(--teal-1, #12AC93)" }}
-            >
-              <div
-                className="grid size-9 shrink-0 place-items-center rounded-xl"
-                style={{ background: "var(--mint-soft)", color: "#0A7C6B" }}
-              >
-                <IconBox className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>
-                  {faNum(lowStock)} مورد با شرایط «کم‌موجود» ثبت شده
-                </div>
-                <div className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
-                  مقایسه کنید تا جایگزین پیدا شود
-                </div>
-              </div>
-              <span style={{ color: "var(--ink-soft)" }}>‹</span>
-            </Link>
-          )}
-
-          {notesCount > 0 && (
-            <Link
-              href="/quick-notes"
-              className="card flex items-center gap-3 border-r-[3px] p-3.5"
-              style={{ borderRightColor: "var(--line)" }}
-            >
-              <div
-                className="grid size-9 shrink-0 place-items-center rounded-xl"
-                style={{ background: "var(--amber-soft)", color: "#8A5A0E" }}
-              >
-                <IconNote className="size-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>
-                  {faNum(notesCount)} یادداشت نیمه‌کاره
-                </div>
-                <div className="text-[11px] truncate" style={{ color: "var(--ink-soft)" }}>
-                  {data?.quickNotes[0]?.body ?? "برای تکمیل، بازش کن"}
-                </div>
-              </div>
-              <span style={{ color: "var(--ink-soft)" }}>‹</span>
-            </Link>
-          )}
-
-          {nothingUrgent && (
-            <div
-              className="card flex items-center gap-3 p-3.5"
-              style={{ borderRight: "3px solid var(--teal-1)" }}
-            >
-              <div
-                className="grid size-9 shrink-0 place-items-center rounded-xl"
-                style={{ background: "var(--mint-soft)", color: "#0A7C6B" }}
-              >
-                ✓
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-bold" style={{ color: "var(--ink)" }}>
-                  همه‌چیز مرتب است
-                </div>
-                <div className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
-                  {faNum(data?.counts.products ?? 0)} محصول، {faNum(data?.counts.visitors ?? 0)} ویزیتور فعال
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* ===== دسترسی سریع ===== */}
-      <section>
-        <h2 className="mb-2.5 text-sm font-bold" style={{ color: "var(--ink-soft)" }}>
-          دسترسی سریع
-        </h2>
-        <NavGrid />
-      </section>
-
-      {/* ===== آخرین سفارش‌های فوری ===== */}
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-bold" style={{ color: "var(--ink-soft)" }}>
-            آخرین سفارش‌های فوری
-          </h2>
-          <Link href="/orders" className="text-xs font-medium" style={{ color: "var(--teal-2)" }}>
-            همه ←
+      {isEmpty ? (
+        <section className="card space-y-3 p-5 text-center">
+          <p className="text-sm font-bold" style={{ color: "var(--ink)" }}>
+            هنوز اطلاعاتی ثبت نشده
+          </p>
+          <p className="text-xs leading-5" style={{ color: "var(--ink-soft)" }}>
+            با افزودن اولین ویزیتور شروع کنید؛ بعد از آن کالاها و چک‌ها را اضافه کنید.
+          </p>
+          <Link href="/visitors" className="btn-primary w-full">
+            افزودن ویزیتور
           </Link>
-        </div>
-        {(data?.recentOrders?.length ?? 0) === 0 ? (
-          <EmptyState
-            icon="🧾"
-            title="هنوز سفارش فوری ثبت نشده"
-            desc="این مسیر فقط برای مواقعی است که ویزیتور در دسترس نیست"
-          />
-        ) : (
-          <div className="space-y-2">
-            {data?.recentOrders.map((o) => (
-              <Link
-                key={o.id}
-                href="/orders"
-                className="card flex items-center justify-between gap-2 px-4 py-3 transition active:scale-[0.99]"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium" style={{ color: "var(--ink)" }}>
-                    {o.visitorName ?? "ویزیتور"}
-                  </div>
-                  <div className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
-                    {faDateTime(o.createdAt)}
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {(data?.expiringOffers?.length ?? 0) > 0 && (
-        <section className="card p-4">
-          <h2 className="mb-3 text-sm font-bold" style={{ color: "var(--ink)" }}>
-            ⏳ آفرهای رو به پایان
+        </section>
+      ) : hasAlerts ? (
+        <section>
+          <h2 className="mb-2 text-sm font-bold" style={{ color: "var(--ink-soft)" }}>
+            نیاز به توجه
           </h2>
-          <div className="space-y-2">
-            {data?.expiringOffers.map((o, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between gap-2 rounded-xl px-3 py-2"
-                style={{ background: "var(--amber-soft)" }}
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-xs font-medium" style={{ color: "var(--ink)" }}>
-                    {o.productName} — {o.visitorName}
-                  </div>
-                  <div className="truncate text-[11px]" style={{ color: "var(--ink-soft)" }}>
-                    {o.offer}
-                  </div>
-                </div>
-                <span
-                  className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold"
-                  style={{ background: "#fff", color: "#8A5A0E" }}
-                >
-                  تا {faDate(o.validUntil)}
-                </span>
-              </div>
-            ))}
+          <div
+            className="overflow-hidden rounded-2xl"
+            style={{ background: "var(--warning-soft)" }}
+          >
+            <div className="divide-y-2 divide-[color:var(--surface)]">
+              {overdue > 0 && (
+                <AlertRow
+                  href="/cheques"
+                  Icon={IconCard}
+                  title={`${faNum(overdue)} چک سررسید گذشته`}
+                  desc={`جمعاً ${compactToman(data.cheques.overdueTotal)} — نیاز به پیگیری`}
+                />
+              )}
+              {upcoming > 0 && (
+                <AlertRow
+                  href="/cheques"
+                  Icon={IconCard}
+                  title={`${faNum(upcoming)} چک تا ۷ روز آینده سررسید دارد`}
+                  desc={`جمعاً ${compactToman(data.cheques.upcomingTotal)}`}
+                />
+              )}
+              {counts.shortages > 0 && (
+                <AlertRow
+                  href="/shortages"
+                  Icon={IconAlert}
+                  title={`${faNum(counts.shortages)} کالای کسری ثبت شده`}
+                  desc="نیاز به پیگیری با ویزیتور"
+                />
+              )}
+              {lowStock > 0 && (
+                <AlertRow
+                  href="/products"
+                  Icon={IconBox}
+                  title={`${faNum(lowStock)} مورد «کم‌موجود»`}
+                  desc="مقایسه کنید تا جایگزین پیدا شود"
+                />
+              )}
+              {offers.length > 0 && (
+                <AlertRow
+                  Icon={IconClock}
+                  title={`${faNum(offers.length)} آفر رو به پایان`}
+                  desc={`${offers[0].productName} — ${offers[0].visitorName}، تا ${faDate(offers[0].validUntil)}`}
+                />
+              )}
+            </div>
           </div>
         </section>
+      ) : (
+        <section className="card flex items-center gap-3 p-4">
+          <p className="text-sm font-bold" style={{ color: "var(--ink)" }}>
+            همه‌چیز مرتب است
+          </p>
+          <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
+            مورد فوری وجود ندارد
+          </p>
+        </section>
       )}
+
+      <section>
+        <h2 className="mb-2 text-sm font-bold" style={{ color: "var(--ink-soft)" }}>
+          کارهای پرتکرار
+        </h2>
+        <div className="grid grid-cols-2 gap-3">
+          <BigCard href="/visitors" title="ویزیتورها" value={counts.visitors} Icon={IconUsers} />
+          <BigCard href="/products" title="کالاها" value={counts.products} Icon={IconBox} />
+          <BigCard
+            href="/price-requests"
+            title="درخواست قیمت"
+            value={counts.openRequests}
+            Icon={IconBanknote}
+          />
+          <BigCard href="/cheques" title="چک‌های نزدیک" value={overdue + upcoming} Icon={IconCard} />
+          <BigCard href="/shortages" title="کسری‌ها" value={counts.shortages} Icon={IconAlert} />
+          <BigCard href="/quick-notes" title="یادداشت‌ها" value={notesCount} Icon={IconNote} />
+        </div>
+      </section>
+
+      <section className="card divide-y divide-[color:var(--line)] overflow-hidden">
+        {[
+          { href: "/orders", title: "سفارش فوری", Icon: IconAlert, extra: counts.openOrders > 0 ? `${faNum(counts.openOrders)} باز` : "" },
+          { href: "/history", title: "تاریخچه", Icon: IconClock, extra: "" },
+          { href: "/settings", title: "حساب و تنظیمات", Icon: IconGear, extra: "" },
+        ].map(({ href, title, Icon, extra }) => (
+          <Link key={href} href={href} className="flex min-h-14 items-center gap-3 px-4">
+            <Icon className="size-5 shrink-0" />
+            <span className="flex-1 text-sm font-medium" style={{ color: "var(--ink)" }}>
+              {title}
+            </span>
+            {extra && (
+              <span className="text-xs" style={{ color: "var(--ink-soft)" }}>
+                {extra}
+              </span>
+            )}
+            <Chevron />
+          </Link>
+        ))}
+      </section>
     </div>
   );
 }
