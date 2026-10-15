@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { AppError, withTenant } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import * as s from "@/db/schema";
@@ -51,7 +51,10 @@ export async function GET() {
         tx.select().from(s.priceRequests).where(eq(s.priceRequests.tenantId, ctx.tenantId)),
         tx.select().from(s.priceRequestItems).where(eq(s.priceRequestItems.tenantId, ctx.tenantId)),
         tx.select().from(s.priceResponses).where(eq(s.priceResponses.tenantId, ctx.tenantId)),
-        tx.select().from(s.orders).where(eq(s.orders.tenantId, ctx.tenantId)),
+        tx
+          .select()
+          .from(s.orders)
+          .where(and(eq(s.orders.tenantId, ctx.tenantId), isNull(s.orders.deletedAt))),
         tx.select().from(s.orderItems).where(eq(s.orderItems.tenantId, ctx.tenantId)),
         tx.select().from(s.quickNotes).where(eq(s.quickNotes.tenantId, ctx.tenantId)),
         tx.select().from(s.cheques).where(eq(s.cheques.tenantId, ctx.tenantId)),
@@ -69,6 +72,9 @@ export async function GET() {
           .from(s.catalogFiles)
           .where(eq(s.catalogFiles.tenantId, ctx.tenantId)),
       ]);
+      // اقلام سفارش‌های حذف‌شده هم در پشتیبان نیامد
+      const activeOrderIds = new Set(orders.map((o) => o.id));
+      const activeOrderItems = orderItems.filter((it) => activeOrderIds.has(it.orderId));
       return {
         meta: {
           app: "pharma-purchasing-assistant",
@@ -84,7 +90,7 @@ export async function GET() {
         items,
         responses,
         orders,
-        orderItems,
+        orderItems: activeOrderItems,
         quickNotes,
         cheques,
         history,
