@@ -219,12 +219,7 @@ export default function DashboardPage() {
 
   if (loading && !data) {
     return (
-      <div className="py-10 text-center">
-        <Spinner />
-        <p className="text-xs" style={{ color: "var(--ink-soft)" }}>
-          در حال بارگذاری…
-        </p>
-      </div>
+      <Spinner />
     );
   }
 
