@@ -391,12 +391,31 @@ export const orders = pgTable(
     // نحوه‌ی تسویه‌ی کل فاکتور (نه هر قلم جدا) — cash | cheque
     settlementType: text("settlement_type").notNull().default("cash"),
     settlementDays: integer("settlement_days").notNull().default(0),
+    // شماره‌ی پشت‌سرهم برای هر داروخانه (از ۱) — از جدول order_counters می‌آید
+    orderNo: integer("order_no").notNull(),
+    // کلید یکتای کلاینت برای ثبت بدون تکرار (idempotent)
+    clientKey: text("client_key"),
+    // حذف نرم: پر بودن یعنی سفارش در سطل بازیافت است
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
-  (t) => [index("orders_tenant_idx").on(t.tenantId, t.createdAt)]
+  (t) => [
+    index("orders_tenant_idx").on(t.tenantId, t.createdAt),
+    uniqueIndex("orders_tenant_order_no_uq").on(t.tenantId, t.orderNo),
+    uniqueIndex("orders_tenant_client_key_uq").on(t.tenantId, t.clientKey),
+    index("orders_tenant_deleted_idx").on(t.tenantId, t.deletedAt),
+  ]
 );
+
+/** شمارنده‌ی سفارش هر داروخانه؛ قفل ردیف آن ثبت همزمان را پشت‌سرهم می‌کند */
+export const orderCounters = pgTable("order_counters", {
+  tenantId: uuid("tenant_id")
+    .primaryKey()
+    .references(() => profiles.id, { onDelete: "cascade" }),
+  lastNo: integer("last_no").notNull().default(0),
+});
 
 export const orderItems = pgTable(
   "order_items",

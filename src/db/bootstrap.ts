@@ -494,6 +494,44 @@ BEGIN
   END IF;
 END $$;
 
+-- ===== orders: شماره‌ی سفارش، کلید ثبت یکتا، حذف نرم (امن و تکرارپذیر) =====
+SELECT pg_advisory_xact_lock(727001);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_no integer;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_key text;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+
+CREATE TABLE IF NOT EXISTS order_counters (
+  tenant_id uuid PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
+  last_no integer NOT NULL DEFAULT 0
+);
+
+-- سفارش‌های بدون شماره: به ترتیب تاریخ ساخت، ادامه‌ی بیشترین شماره‌ی موجود
+WITH base AS (
+  SELECT tenant_id, COALESCE(max(order_no), 0) AS mx FROM orders GROUP BY tenant_id
+), numbered AS (
+  SELECT o.id,
+         b.mx + row_number() OVER (PARTITION BY o.tenant_id ORDER BY o.created_at, o.id) AS rn
+  FROM orders o JOIN base b ON b.tenant_id = o.tenant_id
+  WHERE o.order_no IS NULL
+)
+UPDATE orders SET order_no = numbered.rn FROM numbered WHERE orders.id = numbered.id;
+
+INSERT INTO order_counters (tenant_id, last_no)
+  SELECT tenant_id, max(order_no) FROM orders GROUP BY tenant_id
+  ON CONFLICT (tenant_id) DO UPDATE
+    SET last_no = GREATEST(order_counters.last_no, EXCLUDED.last_no);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM orders WHERE order_no IS NULL) THEN
+    ALTER TABLE orders ALTER COLUMN order_no SET NOT NULL;
+  END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS orders_tenant_order_no_uq ON orders (tenant_id, order_no);
+CREATE UNIQUE INDEX IF NOT EXISTS orders_tenant_client_key_uq ON orders (tenant_id, client_key);
+CREATE INDEX IF NOT EXISTS orders_tenant_deleted_idx ON orders (tenant_id, deleted_at);
+
 -- price_responses: کد stock/cash_discount_pct/check_days/responded_at میخواهد
 ALTER TABLE price_responses ADD COLUMN IF NOT EXISTS stock text;
 ALTER TABLE price_responses ADD COLUMN IF NOT EXISTS cash_discount_pct integer;
@@ -584,6 +622,7 @@ const TENANT_TABLES = [
   "price_responses",
   "orders",
   "order_items",
+  "order_counters",
 ];
 
 function rlsDdl(tables: string[]): string {
@@ -751,7 +790,13 @@ async function isBootstrapped(): Promise<boolean> {
             AND policyname::text = tablename::text || '_tenant_policy') AS policies,
        to_regclass('public.users') IS NOT NULL AS has_users,
        to_regclass('public.profiles') IS NOT NULL AS has_profiles,
-       to_regclass('public.base_products') IS NOT NULL AS has_base_products`,
+       to_regclass('public.base_products') IS NOT NULL AS has_base_products,
+       (SELECT count(*)::int FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'orders'
+            AND column_name IN ('order_no', 'client_key', 'deleted_at')) AS order_cols,
+       to_regclass('public.order_counters') IS NOT NULL AS has_counters,
+       to_regclass('public.orders_tenant_order_no_uq') IS NOT NULL AS has_order_no_idx,
+       to_regclass('public.orders_tenant_client_key_uq') IS NOT NULL AS has_client_key_idx`,
     [TENANT_TABLES]
   );
   const r = rows[0];
@@ -760,6 +805,10 @@ async function isBootstrapped(): Promise<boolean> {
     r.has_users === true &&
     r.has_profiles === true &&
     r.has_base_products === true &&
+    Number(r.order_cols) === 3 &&
+    r.has_counters === true &&
+    r.has_order_no_idx === true &&
+    r.has_client_key_idx === true &&
     Number(r.tables) > 0 &&
     Number(r.policies) === Number(r.tables)
   );
