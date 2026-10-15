@@ -5,33 +5,84 @@
     "Segoe UI", Tahoma, sans-serif;
 }
 
-/* ===== توکن‌های سیستم طراحی — نسخه‌ی روشن، الهام از داروخانه ===== */
+/* فونت محلی — فایل‌ها در public/fonts (بدون Google Fonts) */
+@font-face {
+  font-family: "Vazirmatn";
+  src: local("Vazirmatn Regular"), local("Vazirmatn-Regular"),
+    url("/fonts/Vazirmatn-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vazirmatn";
+  src: local("Vazirmatn Medium"), local("Vazirmatn-Medium"),
+    url("/fonts/Vazirmatn-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vazirmatn";
+  src: local("Vazirmatn Bold"), local("Vazirmatn-Bold"),
+    url("/fonts/Vazirmatn-Bold.woff2") format("woff2");
+  font-weight: 700 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ناحیه‌ی لمسی حداقل ۴۴ پیکسل برای همه‌ی دکمه‌ها؛ ظاهر دکمه تغییر نمی‌کند */
+@layer base {
+  button,
+  [role="button"],
+  summary {
+    position: relative;
+  }
+  button::after,
+  [role="button"]::after,
+  summary::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* ===== توکن‌های طراحی ===== */
 :root {
-  --ink: #241D17;
-  --ink-soft: #9C8F81;
-  --bg: #F8F4EC;
-  --surface: #FFFFFF;
-  --line: #F0E7DA;
-  --danger: #F0562F;
+  /* خنثی */
+  --bg: #f2f4f8;
+  --surface: #ffffff;
+  --ink: #0f172a;
+  --ink-soft: #5a6a80;
+  --line: #e3e8ef;
+  --radius: 16px;
 
-  --teal-1: #12AC93;
-  --teal-2: #0A7C6B;
-  --cobalt-1: #3763C9;
-  --cobalt-2: #1B3B84;
-  --coral-1: #FF8B6B;
-  --coral-2: #F0562F;
-  --violet-1: #8C7CF6;
-  --violet-2: #5E4BC7;
-  --amber-1: #F6C15E;
-  --amber-2: #E08A1E;
-  --gold: #D8A94A;
+  /* تنها رنگ اصلی */
+  --primary: #0d9488;
+  --primary-dark: #0f766e;
+  --primary-soft: #e6f5f3;
 
-  --mint-soft: #E3F7F1;
-  --coral-soft: #FFEDE6;
-  --violet-soft: #EFEBFD;
-  --amber-soft: #FDF3DF;
+  /* رنگ‌های معنایی (فقط برای معنی) */
+  --danger: #dc2626;
+  --danger-soft: #fdecec;
+  --danger-ink: #b91c1c;
+  --warning: #d97706;
+  --warning-soft: #fef3c7;
+  --warning-ink: #92400e;
+  --success: #16a34a;
+  --success-soft: #e7f6ec;
+  --success-ink: #166534;
 
-  --icon-shadow: 0 6px 14px rgba(90, 55, 20, 0.15);
+  /* متن روی رنگ اصلی، پرده‌ی مودال و سایه‌ها */
+  --on-primary: #ffffff;
+  --scrim: rgba(15, 23, 42, 0.5);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-raised: 0 4px 12px rgba(15, 23, 42, 0.18);
+  --focus-ring: 0 0 0 3px rgba(13, 148, 136, 0.15);
 }
 
 html {
@@ -45,27 +96,17 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* لایه‌ی پس‌زمینه‌ی صفحه: کرم روشن + سه هاله‌ی نرم آبرنگی، به‌اندازه نه پررنگ */
-body {
-  background-image:
-    radial-gradient(280px 220px at 92% -6%, rgba(255, 139, 107, 0.10), transparent 60%),
-    radial-gradient(240px 240px at 2% 18%, rgba(140, 124, 246, 0.08), transparent 60%),
-    radial-gradient(280px 260px at 100% 60%, rgba(18, 172, 147, 0.10), transparent 60%);
-  background-repeat: no-repeat;
-  background-attachment: fixed;
-}
-
 :where(h1, h2, h3, .font-bold, .font-extrabold, .font-black, strong) {
   letter-spacing: -0.01em;
 }
 
-/* کارت: سفید با سایه‌ی ملایم گرم */
+/* کارت: سفید، خط نازک، گوشه‌ی ۱۶ پیکسل */
 .card {
-  @apply rounded-3xl;
+  border-radius: var(--radius);
   background: var(--surface);
   border: 1px solid var(--line);
   color: var(--ink);
-  box-shadow: 0 6px 18px rgba(90, 55, 20, 0.06);
+  box-shadow: var(--shadow-card);
 }
 
 .field-label {
@@ -73,8 +114,15 @@ body {
   color: var(--ink-soft);
 }
 
+.field-error {
+  @apply mt-1.5 text-xs font-medium;
+  color: var(--danger);
+}
+
 .field-input {
-  @apply w-full rounded-2xl px-3 py-2.5 text-sm outline-none transition;
+  @apply w-full px-3 py-2.5 text-sm outline-none transition;
+  min-height: 44px;
+  border-radius: var(--radius);
   background: var(--surface);
   border: 1.5px solid var(--line);
   color: var(--ink);
@@ -83,37 +131,42 @@ body {
   color: var(--ink-soft);
 }
 .field-input:focus {
-  border-color: var(--teal-1);
-  box-shadow: 0 0 0 3px rgba(18, 172, 147, 0.15);
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring);
 }
 
-/* دکمه اصلی: گرادیان سبز زمردی */
-.btn-primary {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-bold transition active:scale-[0.98] disabled:opacity-50;
-  background: linear-gradient(135deg, var(--teal-1), var(--teal-2));
-  color: #ffffff;
-  box-shadow: 0 8px 20px rgba(18, 172, 147, 0.28);
+/* دکمه‌ها: حداقل ارتفاع لمسی ۴۴ پیکسل */
+.btn-primary,
+.btn-accent,
+.btn-secondary,
+.btn-danger {
+  @apply inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm transition active:scale-[0.98] disabled:opacity-50;
+  min-height: 44px;
+  border-radius: var(--radius);
 }
 
-/* دکمه CTA مهم: گرادیان کهربایی گرم */
+.btn-primary,
 .btn-accent {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-bold transition active:scale-[0.98] disabled:opacity-50;
-  background: linear-gradient(135deg, var(--amber-1), var(--amber-2));
-  color: #2E1A02;
-  box-shadow: var(--icon-shadow);
+  @apply font-bold;
+  background: var(--primary);
+  color: var(--on-primary);
+}
+.btn-primary:active,
+.btn-accent:active {
+  background: var(--primary-dark);
 }
 
 .btn-secondary {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-medium transition active:scale-[0.98] disabled:opacity-50;
+  @apply font-medium;
   background: var(--surface);
   border: 1.5px solid var(--line);
   color: var(--ink);
 }
 
 .btn-danger {
-  @apply inline-flex items-center justify-center gap-1.5 rounded-2xl px-4 py-2.5 text-sm font-bold text-white transition active:scale-[0.98] disabled:opacity-50;
+  @apply font-bold;
+  color: var(--on-primary);
   background: var(--danger);
-  box-shadow: 0 6px 14px rgba(240, 86, 47, 0.28);
 }
 
 ::-webkit-scrollbar {
