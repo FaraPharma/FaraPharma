@@ -51,8 +51,8 @@ export default function HistoryPage() {
       />
 
       {error && (
-        <p className="rounded-xl bg-[color:var(--amber-soft)] px-3 py-2 text-xs font-medium text-[color:#8A5A0E]">
-          ⚠️ {error}
+        <p className="rounded-xl bg-[color:var(--warning-soft)] px-3 py-2 text-xs font-medium text-[color:var(--warning-ink)]">
+          {error}
         </p>
       )}
 
@@ -65,8 +65,8 @@ export default function HistoryPage() {
           className={cn(
             "flex-1 rounded-xl px-3 py-2 text-xs font-bold transition",
             tab === "conditions"
-              ? "bg-[color:var(--teal-2)] text-white"
-              : "border border-[color:var(--line)] bg-white text-[color:var(--ink-soft)]"
+              ? "bg-[color:var(--primary-dark)] text-[color:var(--on-primary)]"
+              : "border border-[color:var(--line)] bg-[color:var(--surface)] text-[color:var(--ink-soft)]"
           )}
         >
           قیمت و شرایط
@@ -76,8 +76,8 @@ export default function HistoryPage() {
           className={cn(
             "flex-1 rounded-xl px-3 py-2 text-xs font-bold transition",
             tab === "cheques"
-              ? "bg-[color:var(--teal-2)] text-white"
-              : "border border-[color:var(--line)] bg-white text-[color:var(--ink-soft)]"
+              ? "bg-[color:var(--primary-dark)] text-[color:var(--on-primary)]"
+              : "border border-[color:var(--line)] bg-[color:var(--surface)] text-[color:var(--ink-soft)]"
           )}
         >
           چک‌ها
@@ -87,7 +87,6 @@ export default function HistoryPage() {
       {tab === "conditions" ? (
         (data?.conditionEvents.length ?? 0) === 0 ? (
           <EmptyState
-            icon="🕓"
             title="هنوز تغییری ثبت نشده"
             desc="با ویرایش شرایط یا قیمت هر کالا، اسنپ‌شات قبلی اینجا ثبت می‌شود"
           />
@@ -119,7 +118,7 @@ export default function HistoryPage() {
                       )}
                     </div>
                     {e.offer && (
-                      <p className="mt-1 text-[10px] text-[color:var(--ink-soft)]">🎁 {e.offer}</p>
+                      <p className="mt-1 text-[10px] text-[color:var(--ink-soft)]">{e.offer}</p>
                     )}
                   </div>
                   <span className="shrink-0 text-[10px] text-[color:var(--ink-soft)]">
@@ -132,7 +131,6 @@ export default function HistoryPage() {
         )
       ) : (data?.chequeEvents.length ?? 0) === 0 ? (
         <EmptyState
-          icon="💳"
           title="چکی ثبت نشده"
           desc="ثبت و تسویه‌ی چک‌ها اینجا نمایش داده می‌شود"
         />
@@ -146,7 +144,7 @@ export default function HistoryPage() {
                     <span className="text-xs font-bold text-[color:var(--ink)]">
                       {c.visitorName}
                     </span>
-                    <span className="tnum text-[11px] text-[color:#0A7C6B]">
+                    <span className="tnum text-[11px] text-[color:var(--primary-dark)]">
                       {toman(c.amount)}
                     </span>
                   </div>
