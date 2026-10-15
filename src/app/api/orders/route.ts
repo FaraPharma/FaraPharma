@@ -20,6 +20,8 @@ export async function GET() {
         tx
           .select({
             id: orders.id,
+            orderNo: orders.orderNo,
+            deletedAt: orders.deletedAt,
             visitorId: orders.visitorId,
             status: orders.status,
             note: orders.note,
@@ -77,8 +79,18 @@ export async function GET() {
           .where(eq(profiles.id, ctx.tenantId))
           .limit(1),
       ]);
+      // سفارش‌های حذف‌شده فقط در بخش سطل بازیافت می‌آیند، نه در فهرست اصلی
+      const activeOrders = orderRows.filter((o) => !o.deletedAt);
+      const trash = orderRows
+        .filter((o) => o.deletedAt)
+        .sort(
+          (a, b) =>
+            new Date(b.deletedAt as Date).getTime() -
+            new Date(a.deletedAt as Date).getTime()
+        );
       return {
-        orders: orderRows,
+        orders: activeOrders,
+        trash,
         items: itemRows,
         visitors: visitorRows,
         products: productRows,
