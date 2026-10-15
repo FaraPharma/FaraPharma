@@ -183,7 +183,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="card p-4">
-        <h2 className="mb-2 text-sm font-bold text-[color:var(--ink)]">📱 نصب اپلیکیشن</h2>
+        <h2 className="mb-2 text-sm font-bold text-[color:var(--ink)]">نصب اپلیکیشن</h2>
         <p className="mb-3 text-[11px] leading-5 text-[color:var(--ink-soft)]">
           {APP_NAME} یک PWA است: روی صفحه اصلی گوشی نصب می‌شود و جستجوی کالا و لیست
           ویزیتورها حتی بدون اینترنت هم کار می‌کنند (آخرین داده ذخیره می‌شود).
@@ -192,7 +192,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="card p-4">
-        <h2 className="mb-2 text-sm font-bold text-[color:var(--ink)]">☁️ پشتیبان‌گیری</h2>
+        <h2 className="mb-2 text-sm font-bold text-[color:var(--ink)]">پشتیبان‌گیری</h2>
         <p className="mb-3 text-[11px] leading-5 text-[color:var(--ink-soft)]">
           همه داده‌ها به‌صورت خودکار و امن روی سرور ابری (PostgreSQL) ذخیره و محافظت
           می‌شوند. برای اطمینان بیشتر می‌توانید یک نسخه کامل (JSON) از تمام اطلاعات
@@ -207,7 +207,6 @@ export default function SettingsPage() {
       {data?.role === "admin" && (
         <Link href="/admin" className="card flex items-center justify-between p-4 transition active:scale-[0.99]">
           <div className="flex items-center gap-3">
-            <span className="text-2xl">🛡</span>
             <div>
               <div className="text-sm font-bold text-[color:var(--ink)]">پنل مدیریت</div>
               <div className="text-[11px] text-[color:var(--ink-soft)]">مدیریت اشتراک داروخانه‌ها</div>
