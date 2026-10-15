@@ -15,6 +15,8 @@ import {
   Input,
   Spinner,
   EmptyState,
+  AddButton,
+  Segmented,
 } from "@/components/ui";
 import {
   addChequeAction,
@@ -86,7 +88,7 @@ function ChequeRow({
   onSettle: (c: Cheque) => void;
 }) {
   const d = daysLeft(c.dueDate);
-  const borderColor = isOverdue ? "#F0562F" : isWarn ? "#E08A1E" : "var(--line)";
+  const borderColor = isOverdue ? "var(--danger)" : isWarn ? "var(--warning)" : "var(--line)";
   return (
     <div className="card flex items-center gap-3 border-r-[3px] p-3.5" style={{ borderRightColor: borderColor }}>
       <div className="min-w-0 flex-1">
@@ -95,7 +97,7 @@ function ChequeRow({
         </div>
         <div
           className="mt-0.5 flex items-center gap-1 text-[10.5px] font-semibold"
-          style={{ color: isOverdue ? "#C43F1D" : isWarn ? "#8A5A0E" : "var(--ink-soft)" }}
+          style={{ color: isOverdue ? "var(--danger-ink)" : isWarn ? "var(--warning-ink)" : "var(--ink-soft)" }}
         >
           {d !== null && d < 0
             ? `${faNum(-d)} روز گذشته — ${faDate(c.dueDate)}`
@@ -109,10 +111,9 @@ function ChequeRow({
         <button
           onClick={() => onSettle(c)}
           className="mt-1 rounded-full px-2.5 py-1 text-[10px] font-bold"
-          style={{ background: "var(--mint-soft)", color: "#0A7C6B" }}
+          style={{ background: "var(--primary-soft)", color: "var(--primary-dark)" }}
         >
-          تسویه شد ✓
-        </button>
+          تسویه شد         </button>
       </div>
     </div>
   );
@@ -140,8 +141,8 @@ function ChequeGroups({
     <div className="space-y-5">
       {overdueList.length > 0 && (
         <div>
-          <h3 className="mb-2 text-xs font-bold" style={{ color: "#C43F1D" }}>
-            ⚠ سررسید گذشته
+          <h3 className="mb-2 text-xs font-bold" style={{ color: "var(--danger-ink)" }}>
+            سررسید گذشته
           </h3>
           <div className="space-y-2">
             {overdueList.map((c) => (
@@ -152,7 +153,7 @@ function ChequeGroups({
       )}
       {upcomingList.length > 0 && (
         <div>
-          <h3 className="mb-2 text-xs font-bold" style={{ color: "#8A5A0E" }}>
+          <h3 className="mb-2 text-xs font-bold" style={{ color: "var(--warning-ink)" }}>
             سررسید نزدیک
           </h3>
           <div className="space-y-2">
@@ -346,41 +347,25 @@ export default function ChequesPage() {
         title="چک‌ها"
         subtitle="ثبت دستی چک + هشدار سررسید و نمای تقویمی"
         action={
-          <div className="flex gap-1.5">
-            <button
-              onClick={() => setView("list")}
-              className={cn(
-                "rounded-lg px-2.5 py-1.5 text-xs font-medium transition",
-                view === "list"
-                  ? "bg-[color:var(--teal-2)] text-white"
-                  : "border border-[color:var(--line)] bg-white text-[color:var(--ink-soft)]"
-              )}
-            >
-              📋 لیست
-            </button>
-            <button
-              onClick={() => setView("calendar")}
-              className={cn(
-                "rounded-lg px-2.5 py-1.5 text-xs font-medium transition",
-                view === "calendar"
-                  ? "bg-[color:var(--teal-2)] text-white"
-                  : "border border-[color:var(--line)] bg-white text-[color:var(--ink-soft)]"
-              )}
-            >
-              🗓 تقویم
-            </button>
-            <Button onClick={() => setAddOpen(true)} className="px-3 py-2 text-xs">
-              + چک
-            </Button>
-          </div>
+          <>
+            <Segmented
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "list", label: "لیست" },
+                { value: "calendar", label: "تقویم" },
+              ]}
+            />
+            <AddButton onClick={() => setAddOpen(true)}>چک</AddButton>
+          </>
         }
       />
 
       <SubscriptionBanner profile={data?.profile ?? null} trialDays={TRIAL_DAYS} compact />
 
       {error && (
-        <p className="rounded-xl bg-[color:var(--amber-soft)] px-3 py-2 text-xs font-medium text-[color:#8A5A0E]">
-          ⚠️ {error}
+        <p className="rounded-xl bg-[color:var(--warning-soft)] px-3 py-2 text-xs font-medium text-[color:var(--warning-ink)]">
+          {error}
         </p>
       )}
 
@@ -389,13 +374,13 @@ export default function ChequesPage() {
       {(overdueCount > 0 || nearCount > 0) && (
         <div className="grid grid-cols-3 gap-2">
           <div className="card p-3 text-center">
-            <div className="tnum text-base font-extrabold" style={{ color: overdueCount > 0 ? "#C43F1D" : "var(--ink)" }}>
+            <div className="tnum text-base font-extrabold" style={{ color: overdueCount > 0 ? "var(--danger-ink)" : "var(--ink)" }}>
               {faNum(overdueCount)}
             </div>
             <div className="mt-0.5 text-[10px] font-semibold" style={{ color: "var(--ink-soft)" }}>سررسید گذشته</div>
           </div>
           <div className="card p-3 text-center">
-            <div className="tnum text-base font-extrabold" style={{ color: nearCount > 0 ? "#8A5A0E" : "var(--ink)" }}>
+            <div className="tnum text-base font-extrabold" style={{ color: nearCount > 0 ? "var(--warning-ink)" : "var(--ink)" }}>
               {faNum(nearCount)}
             </div>
             <div className="mt-0.5 text-[10px] font-semibold" style={{ color: "var(--ink-soft)" }}>
@@ -403,7 +388,7 @@ export default function ChequesPage() {
             </div>
           </div>
           <div className="card p-3 text-center">
-            <div className="tnum text-base font-extrabold" style={{ color: "var(--teal-2)" }}>
+            <div className="tnum text-base font-extrabold" style={{ color: "var(--primary-dark)" }}>
               {compactToman(totalOpenAmount)}
             </div>
             <div className="mt-0.5 text-[10px] font-semibold" style={{ color: "var(--ink-soft)" }}>جمع کل باز (تومان)</div>
@@ -414,12 +399,12 @@ export default function ChequesPage() {
       {!notifGranted && (
         <div className="card flex items-center justify-between gap-2 p-3">
           <p className="text-[11px] leading-5 text-[color:var(--ink-soft)]">
-            🔔 یادآوری فعال: با فعال‌سازی، نزدیک سررسید هر چک، اعلان دریافت
+            یادآوری فعال: با فعال‌سازی، نزدیک سررسید هر چک، اعلان دریافت
             می‌کنید (حتی وقتی در اپ نیستید)
           </p>
           <button
             onClick={enableReminders}
-            className="shrink-0 rounded-2xl bg-[color:var(--amber-1)] px-3 py-2 text-[11px] font-bold text-[color:#8A5A0E] transition active:scale-95"
+            className="shrink-0 rounded-2xl bg-[color:var(--warning)] px-3 py-2 text-[11px] font-bold text-[color:var(--warning-ink)] transition active:scale-95"
           >
             فعال‌سازی
           </button>
@@ -428,7 +413,6 @@ export default function ChequesPage() {
 
       {(data?.cheques.length ?? 0) === 0 ? (
         <EmptyState
-          icon="💳"
           title="چکی ثبت نشده"
           desc="با دکمه «+ چک» نام ویزیتور، مبلغ و تاریخ سررسید را دستی وارد کنید"
         />
@@ -459,7 +443,7 @@ export default function ChequesPage() {
                 onClick={() =>
                   setMonth({ y: now.getFullYear(), m: now.getMonth() })
                 }
-                className="rounded-full bg-[color:var(--mint-soft)] px-2 py-0.5 text-[10px] font-medium text-[color:#0A7C6B]"
+                className="rounded-full bg-[color:var(--primary-soft)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--primary-dark)]"
               >
                 امروز
               </button>
@@ -508,20 +492,20 @@ export default function ChequesPage() {
                   className={cn(
                     "min-h-14 rounded-lg border p-1 text-right transition",
                     selectedDay === key
-                      ? "border-[color:var(--teal-1)] bg-[color:var(--mint-soft)]/70"
+                      ? "border-[color:var(--primary)] bg-[color:var(--primary-soft)]/70"
                       : hasOverdue
-                        ? "border-[#F0562F]/40 bg-[color:var(--coral-soft)]/50"
+                        ? "border-[color:var(--danger)]/40 bg-[color:var(--danger-soft)]/50"
                         : hasWarn
-                          ? "border-[color:var(--amber-1)] bg-[color:var(--amber-soft)]/50"
+                          ? "border-[color:var(--warning)] bg-[color:var(--warning-soft)]/50"
                           : isToday
-                            ? "border-[color:var(--teal-1)] bg-white"
-                            : "border-[color:var(--line)] bg-white"
+                            ? "border-[color:var(--primary)] bg-[color:var(--surface)]"
+                            : "border-[color:var(--line)] bg-[color:var(--surface)]"
                   )}
                 >
                   <div
                     className={cn(
                       "text-[11px] font-medium",
-                      isToday ? "text-[color:#0A7C6B]" : "text-[color:var(--ink-soft)]"
+                      isToday ? "text-[color:var(--primary-dark)]" : "text-[color:var(--ink-soft)]"
                     )}
                   >
                     {faNum(cell.date.getDate())}
@@ -531,7 +515,7 @@ export default function ChequesPage() {
                       <div className="tnum text-[9px] font-bold text-[color:var(--ink)]">
                         {faNum(dayCheques.length)} چک
                       </div>
-                      <div className="tnum text-[9px] text-[color:#0A7C6B]">
+                      <div className="tnum text-[9px] text-[color:var(--primary-dark)]">
                         {compactToman(total)}
                       </div>
                     </div>
@@ -546,7 +530,7 @@ export default function ChequesPage() {
             <div className="mt-3 border-t border-[color:var(--line)] pt-3">
               <p className="mb-2 text-xs font-bold text-[color:var(--ink)]">
                 چک‌های {faDate(selectedDay)} — مجموع:{" "}
-                <span className="tnum text-[color:#0A7C6B]">
+                <span className="tnum text-[color:var(--primary-dark)]">
                   {toman(
                     selectedDayCheques.reduce((s, c) => s + c.amount, 0)
                   )}
@@ -562,7 +546,7 @@ export default function ChequesPage() {
                       <div className="text-xs font-bold text-[color:var(--ink)]">
                         {c.visitorName}
                       </div>
-                      <div className="tnum text-[11px] text-[color:#0A7C6B]">
+                      <div className="tnum text-[11px] text-[color:var(--primary-dark)]">
                         {toman(c.amount)}
                       </div>
                     </div>
@@ -571,7 +555,7 @@ export default function ChequesPage() {
                       className="shrink-0 px-2.5 py-1 text-[11px]"
                       onClick={() => settle(c)}
                     >
-                      ✅ تسویه
+                      تسویه
                     </Button>
                   </div>
                 ))}
@@ -582,12 +566,12 @@ export default function ChequesPage() {
       )}
 
       {/* تاریخچه تسویه‌شده */}
-      <div className="overflow-hidden rounded-2xl border border-[color:var(--line)] bg-white">
+      <div className="overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface)]">
         <button
           onClick={() => setHistoryOpen((o) => !o)}
           className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-[color:var(--ink-soft)]"
         >
-          <span>🗂 تاریخچه تسویه‌شده ({faNum(data?.history.length ?? 0)})</span>
+          <span>تاریخچه تسویه‌شده ({faNum(data?.history.length ?? 0)})</span>
           <span className={cn("transition-transform", historyOpen && "rotate-180")}>▼</span>
         </button>
         {historyOpen && (
@@ -617,10 +601,9 @@ export default function ChequesPage() {
                   </div>
                   <button
                     onClick={() => remove(c)}
-                    className="shrink-0 text-[10px] text-[#C43F1D]"
+                    className="shrink-0 text-[10px] text-[var(--danger-ink)]"
                   >
-                    🗑
-                  </button>
+                                      </button>
                 </div>
               ))
             )}
@@ -674,7 +657,7 @@ export default function ChequesPage() {
           <p className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
             همه‌ی مقادیر دستی وارد می‌شوند؛ هیچ محاسبه‌ی خودکاری انجام نمی‌شود.
           </p>
-          <Button type="submit" variant="accent" disabled={busy} className="w-full">
+          <Button type="submit" variant="primary" disabled={busy} className="w-full">
             {busy ? "در حال ثبت…" : "ثبت چک"}
           </Button>
         </form>
