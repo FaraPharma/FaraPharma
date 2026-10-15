@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useOfflineData } from "@/hooks/useOfflineData";
@@ -25,6 +25,7 @@ import {
   deleteRequestAction,
 } from "@/actions/priceRequests";
 import { createOrderAction } from "@/actions/orders";
+import { newClientKey } from "@/lib/client-key";
 import {
   buildRequestText,
   whatsappUrl,
@@ -86,6 +87,8 @@ export function PriceRequestsInner() {
   const [pickQ, setPickQ] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const orderKeysRef = useRef<Record<string, string>>({});
+  const orderingRef = useRef(false);
   const [share, setShare] = useState<PriceRequest | null>(null);
   const [detail, setDetail] = useState<PriceRequest | null>(null);
   // response form: one visitor × all request products
@@ -231,8 +234,16 @@ export function PriceRequestsInner() {
       toast.error("این درخواست کالایی ندارد");
       return;
     }
+    // دوبار لمس: ثبت دوم نادیده گرفته می‌شود؛ تلاش دوباره بعد از خطا همان کلید را دارد
+    if (orderingRef.current) return;
+    orderingRef.current = true;
+    const mapKey = `${detail.id}:${visitorId}`;
+    if (!orderKeysRef.current[mapKey]) orderKeysRef.current[mapKey] = newClientKey();
     setBusy(true);
-    const res = await createOrderAction({
+    let res: Awaited<ReturnType<typeof createOrderAction>>;
+    try {
+      res = await createOrderAction({
+      clientKey: orderKeysRef.current[mapKey],
       visitorId,
       note: `ثبت از مقایسه قیمت (${faDate(detail.createdAt)})`,
       items: items.map((it) => {
@@ -244,8 +255,12 @@ export function PriceRequestsInner() {
           discountPct: 0,
         };
       }),
-    });
-    setBusy(false);
+      });
+    } finally {
+      orderingRef.current = false;
+      setBusy(false);
+    }
+    if (res.ok) delete orderKeysRef.current[mapKey];
     if (res.ok) {
       toast.success("سفارش ثبت شد — برای خروجی به صفحه سفارش‌ها رفتید");
       router.push("/orders");
