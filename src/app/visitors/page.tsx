@@ -17,6 +17,7 @@ import {
   Textarea,
   Spinner,
   EmptyState,
+  AddButton,
 } from "@/components/ui";
 import { ConditionForm } from "@/components/condition-form";
 import { MicButton } from "@/components/mic-button";
@@ -344,7 +345,7 @@ export default function VisitorsPage() {
           kind: diffPct > 0 ? "up" : "down",
           text:
             diffPct > 0
-              ? `⚠ ${faNum(diffPct)}٪ بیشتر از قیمت قبلی همین ویزیتور (${faNum(ownPrev)})`
+              ? `${faNum(diffPct)}٪ بیشتر از قیمت قبلی همین ویزیتور (${faNum(ownPrev)})`
               : `${faNum(Math.abs(diffPct))}٪ کمتر از قیمت قبلی همین ویزیتور (${faNum(ownPrev)})`,
         };
       }
@@ -360,7 +361,7 @@ export default function VisitorsPage() {
         if (diffPct >= 15) {
           return {
             kind: "up" as const,
-            text: `⚠ ${cheapest.visitorName} همین را ${faNum(diffPct)}٪ ارزان‌تر (${faNum(cheapest.price)}) دارد`,
+            text: `${cheapest.visitorName} همین را ${faNum(diffPct)}٪ ارزان‌تر (${faNum(cheapest.price)}) دارد`,
           };
         }
       }
@@ -443,24 +444,21 @@ export default function VisitorsPage() {
         title="ویزیتورها"
         subtitle="نمایندگان شرکت‌های پخش و تولید"
         action={
-          <Button onClick={openAdd} className="px-3 py-2 text-xs">
-            + ویزیتور
-          </Button>
+          <AddButton onClick={openAdd}>ویزیتور</AddButton>
         }
       />
 
       <SubscriptionBanner profile={data?.profile ?? null} trialDays={TRIAL_DAYS} compact />
 
       {error && (
-        <p className="rounded-xl bg-[color:var(--amber-soft)] px-3 py-2 text-xs font-medium text-[color:#8A5A0E]">
-          ⚠️ {error}
+        <p className="rounded-xl bg-[color:var(--warning-soft)] px-3 py-2 text-xs font-medium text-[color:var(--warning-ink)]">
+          {error}
         </p>
       )}
 
       <OfflineBadge stale={stale} savedAt={savedAt} />
 
       <div className="card flex items-center gap-2 p-2">
-        <span className="ps-1">🔎</span>
         <input
           className="w-full bg-transparent text-sm outline-none placeholder:text-[color:var(--ink-soft)]"
           placeholder="نام، شرکت یا تلفن ویزیتور…"
@@ -471,7 +469,6 @@ export default function VisitorsPage() {
 
       {filtered.length === 0 ? (
         <EmptyState
-          icon="🤝"
           title="ویزیتوری ثبت نشده"
           desc="با دکمه «+ ویزیتور» به سرعت اولین نماینده را اضافه کنید"
         />
@@ -509,11 +506,11 @@ export default function VisitorsPage() {
                     {conds.length > 0 && (
                       <div
                         className="mt-1.5 flex items-center gap-1 text-[10px] font-bold"
-                        style={{ color: fresh ? "#0A7C6B" : "#C43F1D" }}
+                        style={{ color: fresh ? "var(--primary-dark)" : "var(--danger-ink)" }}
                       >
                         <span
                           className="size-1.5 rounded-full"
-                          style={{ background: fresh ? "#12AC93" : "#F0562F" }}
+                          style={{ background: fresh ? "var(--primary)" : "var(--danger)" }}
                         />
                         {daysSince === 0
                           ? "به‌روز — امروز"
@@ -542,8 +539,8 @@ export default function VisitorsPage() {
             <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--ink-soft)]">
               {selected.company && <Badge color="blue">{selected.company}</Badge>}
               {selected.phone && (
-                <a href={`tel:${selected.phone}`} className="font-medium text-[color:#0A7C6B]" dir="ltr">
-                  📞 {faNum(selected.phone)}
+                <a href={`tel:${selected.phone}`} className="font-medium text-[color:var(--primary-dark)]" dir="ltr">
+                  {faNum(selected.phone)}
                 </a>
               )}
               {selected.phone && (
@@ -551,9 +548,9 @@ export default function VisitorsPage() {
                   href={whatsappUrl(selected.phone, "سلام، وقت بخیر")}
                   target="_blank"
                   rel="noreferrer"
-                  className="font-medium text-[color:#0A7C6B]"
+                  className="font-medium text-[color:var(--primary-dark)]"
                 >
-                  💬 واتساپ
+                  واتساپ
                 </a>
               )}
               {selected.messengerUsername && (
@@ -562,15 +559,15 @@ export default function VisitorsPage() {
                     href={telegramUrl(selected.messengerUsername)}
                     target="_blank"
                     rel="noreferrer"
-                    className="font-medium text-sky-600"
+                    className="font-medium text-[color:var(--primary-dark)]"
                   >
-                    ✈️ تلگرام
+                    تلگرام
                   </a>
                   <a
                     href={baleUrl(selected.messengerUsername)}
                     target="_blank"
                     rel="noreferrer"
-                    className="font-medium text-[color:#0A7C6B]"
+                    className="font-medium text-[color:var(--primary-dark)]"
                   >
                     🅱️ بله
                   </a>
@@ -578,9 +575,9 @@ export default function VisitorsPage() {
                     href={rubikaUrl(selected.messengerUsername)}
                     target="_blank"
                     rel="noreferrer"
-                    className="font-medium text-[color:#C43F1D]"
+                    className="font-medium text-[color:var(--danger-ink)]"
                   >
-                    🔴 روبیکا
+                    روبیکا
                   </a>
                 </>
               )}
@@ -599,14 +596,14 @@ export default function VisitorsPage() {
                     setEditVisitor(selected);
                   }}
                 >
-                  ✏️ ویرایش
+                  ویرایش
                 </Button>
                 <Button
                   variant="ghost"
-                  className="px-2 py-1 text-xs text-[color:#C43F1D]"
+                  className="px-2 py-1 text-xs text-[color:var(--danger-ink)]"
                   onClick={() => removeVisitor(selected)}
                 >
-                  🗑 حذف
+                  حذف
                 </Button>
               </div>
             </div>
@@ -619,7 +616,7 @@ export default function VisitorsPage() {
                   type="button"
                   onClick={() => setCondOpen({ visitorId: selected.id, initial: null })}
                   className="text-[11px] font-bold"
-                  style={{ color: "var(--teal-2)" }}
+                  style={{ color: "var(--primary-dark)" }}
                 >
                   تنظیمات پیشرفته (موجودی، انقضا...) +
                 </button>
@@ -632,9 +629,9 @@ export default function VisitorsPage() {
                   onClick={() => setAddMode("type")}
                   className={cn(
                     "flex-1 rounded-xl py-1.5 text-[11px] font-bold transition",
-                    addMode === "type" ? "bg-white shadow-sm" : ""
+                    addMode === "type" ? "bg-[color:var(--surface)] shadow-sm" : ""
                   )}
-                  style={{ color: addMode === "type" ? "var(--teal-2)" : "var(--ink-soft)" }}
+                  style={{ color: addMode === "type" ? "var(--primary-dark)" : "var(--ink-soft)" }}
                 >
                   تایپ تکی
                 </button>
@@ -643,9 +640,9 @@ export default function VisitorsPage() {
                   onClick={() => setAddMode("paste")}
                   className={cn(
                     "flex-1 rounded-xl py-1.5 text-[11px] font-bold transition",
-                    addMode === "paste" ? "bg-white shadow-sm" : ""
+                    addMode === "paste" ? "bg-[color:var(--surface)] shadow-sm" : ""
                   )}
-                  style={{ color: addMode === "paste" ? "var(--teal-2)" : "var(--ink-soft)" }}
+                  style={{ color: addMode === "paste" ? "var(--primary-dark)" : "var(--ink-soft)" }}
                 >
                   پیست لیست
                 </button>
@@ -692,7 +689,7 @@ export default function VisitorsPage() {
                     />
                     {quickSuggestions.length > 0 && (
                       <div
-                        className="absolute top-full right-0 left-0 z-10 mt-1 overflow-hidden rounded-xl border bg-white shadow-lg"
+                        className="absolute top-full right-0 left-0 z-10 mt-1 overflow-hidden rounded-xl border bg-[color:var(--surface)] shadow-lg"
                         style={{ borderColor: "var(--line)" }}
                       >
                         {quickSuggestions.map((s) => (
@@ -706,8 +703,8 @@ export default function VisitorsPage() {
                             <span
                               className="shrink-0 rounded-full px-2 py-0.5 text-[9px] font-bold"
                               style={{
-                                background: s.own ? "var(--mint-soft)" : "var(--violet-soft)",
-                                color: s.own ? "#0A7C6B" : "#5E4BC7",
+                                background: s.own ? "var(--primary-soft)" : "var(--primary-soft)",
+                                color: s.own ? "var(--primary-dark)" : "var(--primary-dark)",
                               }}
                             >
                               {s.own ? "قبلاً از این ویزیتور" : `${faNum(s.otherCount)} ویزیتور دیگر دارند`}
@@ -724,8 +721,8 @@ export default function VisitorsPage() {
                     <p
                       className="mt-1.5 rounded-lg px-2.5 py-1.5 text-center text-[10.5px] font-medium"
                       style={{
-                        background: priceWarning.kind === "up" ? "var(--amber-soft)" : "var(--mint-soft)",
-                        color: priceWarning.kind === "up" ? "#8A5A0E" : "#0A7C6B",
+                        background: priceWarning.kind === "up" ? "var(--warning-soft)" : "var(--primary-soft)",
+                        color: priceWarning.kind === "up" ? "var(--warning-ink)" : "var(--primary-dark)",
                       }}
                     >
                       {priceWarning.text}
@@ -746,10 +743,10 @@ export default function VisitorsPage() {
                         <div
                           key={i}
                           className="flex items-center justify-between rounded-lg px-2 py-1 text-[11px]"
-                          style={{ background: it.price ? "var(--mint-soft)" : "var(--amber-soft)" }}
+                          style={{ background: it.price ? "var(--primary-soft)" : "var(--warning-soft)" }}
                         >
                           <span style={{ color: "var(--ink)" }}>{it.name}</span>
-                          <span className="tnum" style={{ color: it.price ? "#0A7C6B" : "#8A5A0E" }}>
+                          <span className="tnum" style={{ color: it.price ? "var(--primary-dark)" : "var(--warning-ink)" }}>
                             {it.price ? faNum(it.price) : "بدون قیمت"}
                           </span>
                         </div>
@@ -771,7 +768,6 @@ export default function VisitorsPage() {
                   className="rounded-2xl border border-dashed px-4 py-6 text-center"
                   style={{ borderColor: "var(--line)" }}
                 >
-                  <div className="mb-1 text-2xl">📋</div>
                   <p className="text-xs font-bold" style={{ color: "var(--ink)" }}>هنوز محصولی ثبت نشده</p>
                   <p className="mt-1 text-[11px]" style={{ color: "var(--ink-soft)" }}>
                     از کادر بالا شروع کن، یا کاتالوگ کاملش را آپلود کن
@@ -784,7 +780,7 @@ export default function VisitorsPage() {
                     return (
                       <div
                         key={c.id}
-                        className="rounded-2xl border border-[color:var(--line)] bg-white p-3"
+                        className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface)] p-3"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
@@ -804,7 +800,7 @@ export default function VisitorsPage() {
                               {c.validUntil && <Badge color="amber">تا {faDate(c.validUntil)}</Badge>}
                             </div>
                             {c.offer && (
-                              <p className="mt-1 text-[11px] text-[color:var(--ink-soft)]">🎁 {c.offer}</p>
+                              <p className="mt-1 text-[11px] text-[color:var(--ink-soft)]">{c.offer}</p>
                             )}
                             <TrendPanel
                               history={data!.history.filter(
@@ -823,14 +819,12 @@ export default function VisitorsPage() {
                               onClick={() => setCondOpen({ visitorId: selected.id, initial: c })}
                               className="grid size-7 place-items-center rounded-lg bg-[color:var(--line)] text-xs"
                             >
-                              ✏️
-                            </button>
+                                                          </button>
                             <button
                               onClick={() => removeCondition(c.id)}
-                              className="grid size-7 place-items-center rounded-lg bg-[color:var(--coral-soft)] text-xs"
+                              className="grid size-7 place-items-center rounded-lg bg-[color:var(--danger-soft)] text-xs"
                             >
-                              🗑
-                            </button>
+                                                          </button>
                           </div>
                         </div>
                       </div>
@@ -845,7 +839,7 @@ export default function VisitorsPage() {
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-bold text-[color:var(--ink)]">کاتالوگ PDF</h3>
                 <label className="btn-secondary cursor-pointer px-3 py-1.5 text-xs">
-                  {catBusy ? "در حال آپلود…" : "📤 آپلود کاتالوگ"}
+                  {catBusy ? "در حال آپلود…" : "آپلود کاتالوگ"}
                   <input
                     type="file"
                     accept=".pdf,application/pdf"
@@ -871,7 +865,7 @@ export default function VisitorsPage() {
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <div className="truncate text-xs font-medium text-[color:var(--ink)]">
-                            📄 {c.fileName}
+                            {c.fileName}
                             <span className="ms-1 text-[10px] font-normal text-[color:var(--ink-soft)]">
                               · {faNum(Math.round(c.sizeBytes / 1024))} کیلوبایت
                             </span>
@@ -908,10 +902,9 @@ export default function VisitorsPage() {
                         <p className="flex-1 text-xs leading-5 text-[color:var(--ink)]">{n.body}</p>
                         <button
                           onClick={() => removeNote(n.id)}
-                          className="shrink-0 text-xs text-[color:#C43F1D]"
+                          className="shrink-0 text-xs text-[color:var(--danger-ink)]"
                         >
-                          🗑
-                        </button>
+                                                  </button>
                       </div>
                       <div className="mt-1.5 text-[10px] text-[color:var(--ink-soft)]">{faDateTime(n.createdAt)}</div>
                     </div>
@@ -938,8 +931,8 @@ export default function VisitorsPage() {
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="افزودن سریع ویزیتور">
         <form onSubmit={saveVisitor} className="space-y-3">
           {qnText && (
-            <div className="rounded-xl border border-[color:var(--teal-1)] bg-[color:var(--mint-soft)]/60 px-3 py-2 text-[11px] leading-5 text-[color:#0A7C6B]">
-              📝 از یادداشت: <span className="font-medium">{qnText}</span>
+            <div className="rounded-xl border border-[color:var(--primary)] bg-[color:var(--primary-soft)]/60 px-3 py-2 text-[11px] leading-5 text-[color:var(--primary-dark)]">
+              از یادداشت: <span className="font-medium">{qnText}</span>
             </div>
           )}
           <Field label="نام ویزیتور">
@@ -989,7 +982,7 @@ export default function VisitorsPage() {
           <p className="text-[11px] text-[color:var(--ink-soft)]">
             بقیه جزئیات (شرایط، یادداشت‌ها) را بعداً از جزئیات ویزیتور تکمیل کنید.
           </p>
-          <Button type="submit" variant="accent" disabled={busy} className="w-full">
+          <Button type="submit" variant="primary" disabled={busy} className="w-full">
             {busy ? "در حال ذخیره…" : "افزودن ویزیتور"}
           </Button>
         </form>
