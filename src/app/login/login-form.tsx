@@ -32,7 +32,7 @@ export function LoginForm() {
 
   return (
     <AuthShell>
-      <h2 className="mb-4 text-base font-bold text-slate-900">ورود به حساب</h2>
+      <h2 className="mb-4 text-base font-bold text-[color:var(--ink)]">ورود به حساب</h2>
       <form onSubmit={submit} className="space-y-3">
         <Field label="ایمیل">
           <Input
@@ -44,7 +44,7 @@ export function LoginForm() {
             required
           />
         </Field>
-        <Field label="رمز عبور">
+        <Field label="رمز عبور" error={error}>
           <Input
             type="password"
             dir="ltr"
@@ -54,18 +54,13 @@ export function LoginForm() {
             required
           />
         </Field>
-        {error && (
-          <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-medium text-rose-600">
-            {error}
-          </p>
-        )}
-        <Button type="submit" variant="accent" disabled={busy} className="w-full">
+        <Button type="submit" variant="primary" disabled={busy} className="w-full">
           {busy ? "در حال ورود…" : "ورود"}
         </Button>
       </form>
-      <p className="mt-4 text-center text-xs text-slate-500">
+      <p className="mt-4 text-center text-xs text-[color:var(--ink-soft)]">
         حساب ندارید؟{" "}
-        <Link href="/register" className="font-bold text-teal-600">
+        <Link href="/register" className="font-bold text-[color:var(--primary-dark)]">
           ثبت‌نام و شروع دوره آزمایشی رایگان
         </Link>
       </p>
@@ -76,7 +71,7 @@ export function LoginForm() {
       </div>
 
       <p className="mt-4 text-center">
-        <Link href="/privacy" className="text-[10px] text-slate-400 underline">
+        <Link href="/privacy" className="text-[10px] text-[color:var(--ink-soft)] underline">
           قوانین و حریم خصوصی
         </Link>
       </p>
