@@ -43,13 +43,13 @@ function pdfInnerHtml(order: Order, pharmacyName?: string): string {
     order.settlementDays ? ` ${order.settlementDays} روزه` : ""
   }`;
   return `
-    <div style="direction:rtl;font-family:Vazirmatn,Tahoma,sans-serif;color:#241D17;">
-      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #0A7C6B;padding-bottom:12px;">
+    <div style="direction:rtl;font-family:Vazirmatn,Tahoma,sans-serif;color:var(--ink);">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid var(--primary-dark);padding-bottom:12px;">
         <div>
           <div style="font-size:22px;font-weight:700;">فرم سفارش خرید</div>
-          <div style="font-size:13px;color:#9C8F81;margin-top:4px;">${pharmacyName ?? "دستیار خرید داروخانه"}</div>
+          <div style="font-size:13px;color:var(--ink-soft);margin-top:4px;">${pharmacyName ?? "دستیار خرید داروخانه"}</div>
         </div>
-        <div style="text-align:left;font-size:12px;color:#9C8F81;">
+        <div style="text-align:left;font-size:12px;color:var(--ink-soft);">
           <div>تاریخ: ${date}</div>
           <div>شماره: ${order.id.slice(0, 8)}</div>
         </div>
@@ -61,25 +61,25 @@ function pdfInnerHtml(order: Order, pharmacyName?: string): string {
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <thead>
-          <tr style="background:#0A7C6B;color:#fff;">
-            <th style="padding:8px;border:1px solid #0A7C6B;">ردیف</th>
-            <th style="padding:8px;border:1px solid #0A7C6B;">نام کالا</th>
-            <th style="padding:8px;border:1px solid #0A7C6B;">تعداد</th>
-            <th style="padding:8px;border:1px solid #0A7C6B;">قیمت واحد (تومان)</th>
-            <th style="padding:8px;border:1px solid #0A7C6B;">تخفیف</th>
-            <th style="padding:8px;border:1px solid #0A7C6B;">مبلغ (تومان)</th>
+          <tr style="background:var(--primary-dark);color:var(--on-primary);">
+            <th style="padding:8px;border:1px solid var(--primary-dark);">ردیف</th>
+            <th style="padding:8px;border:1px solid var(--primary-dark);">نام کالا</th>
+            <th style="padding:8px;border:1px solid var(--primary-dark);">تعداد</th>
+            <th style="padding:8px;border:1px solid var(--primary-dark);">قیمت واحد (تومان)</th>
+            <th style="padding:8px;border:1px solid var(--primary-dark);">تخفیف</th>
+            <th style="padding:8px;border:1px solid var(--primary-dark);">مبلغ (تومان)</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
         <tfoot>
-          <tr style="background:#E3F7F1;font-weight:700;">
-            <td colspan="5" style="padding:10px;border:1px solid #12AC93;text-align:left;">جمع کل</td>
-            <td style="padding:10px;border:1px solid #12AC93;">${total}</td>
+          <tr style="background:var(--primary-soft);font-weight:700;">
+            <td colspan="5" style="padding:10px;border:1px solid var(--primary);text-align:left;">جمع کل</td>
+            <td style="padding:10px;border:1px solid var(--primary);">${total}</td>
           </tr>
         </tfoot>
       </table>
       ${order.note ? `<div style="margin-top:14px;font-size:13px;"><b>توضیحات:</b> ${order.note}</div>` : ""}
-      <div style="margin-top:40px;font-size:12px;color:#9C8F81;display:flex;justify-content:space-between;">
+      <div style="margin-top:40px;font-size:12px;color:var(--ink-soft);display:flex;justify-content:space-between;">
         <span>مهر و امضا فروشنده</span>
         <span>مهر و امضا خریدار</span>
       </div>
@@ -95,14 +95,13 @@ export async function exportOrderPdf(order: Order, pharmacyName?: string): Promi
   const el = document.createElement("div");
   el.setAttribute("dir", "rtl");
   el.style.cssText =
-    "position:fixed;top:-10000px;left:0;width:794px;background:#ffffff;padding:36px;z-index:-1;";
+    "position:fixed;top:-10000px;left:0;width:794px;background:var(--surface);padding:36px;z-index:-1;";
   el.innerHTML = pdfInnerHtml(order, pharmacyName);
   document.body.appendChild(el);
   try {
     await document.fonts.ready;
     const canvas = await html2canvas.default(el, {
       scale: 2,
-      backgroundColor: "#ffffff",
     });
     const img = canvas.toDataURL("image/jpeg", 0.95);
     const pdf = new JsPDF({ orientation: "portrait", unit: "mm", format: "a4" });

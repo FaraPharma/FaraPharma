@@ -39,10 +39,12 @@ export function JalaliDatePicker({
   value,
   onChange,
   className,
+  name,
 }: {
   value: string;
   onChange: (iso: string) => void;
   className?: string;
+  name?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => fromIso(value));
@@ -72,6 +74,7 @@ export function JalaliDatePicker({
 
   return (
     <div className="relative">
+      {name ? <input type="hidden" name={name} value={value} /> : null}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -85,11 +88,14 @@ export function JalaliDatePicker({
             ? `${toFa(view.jy)}/${toFa(view.jm)}/${toFa(view.jd)}`
             : "انتخاب تاریخ"}
         </span>
-        <span className="text-[color:var(--ink-soft)]">📅</span>
+        <svg viewBox="0 0 24 24" className="size-5 text-[color:var(--ink-soft)]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+          <path d="M3.5 10h17M8 3v4M16 3v4" />
+        </svg>
       </button>
 
       {open && (
-        <div className="absolute inset-x-0 top-full z-30 mt-1 rounded-2xl border border-[color:var(--line)] bg-white p-3 shadow-xl">
+        <div className="absolute inset-x-0 top-full z-30 mt-1 rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface)] p-3 shadow-xl">
           <div className="mb-2 flex items-center justify-between">
             <button
               type="button"
@@ -142,8 +148,8 @@ export function JalaliDatePicker({
                     (d === current.jd &&
                     view.jm === current.jm &&
                     view.jy === current.jy
-                      ? "bg-[color:var(--teal-1)] font-bold text-white"
-                      : "text-[color:var(--ink)] hover:bg-[color:var(--mint-soft)]")
+                      ? "bg-[color:var(--primary)] font-bold text-[color:var(--on-primary)]"
+                      : "text-[color:var(--ink)] hover:bg-[color:var(--primary-soft)]")
                   }
                 >
                   {toFa(d)}
