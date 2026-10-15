@@ -30,7 +30,7 @@ export async function GET() {
           disabled: users.disabled,
           visitorCount: sql<number>`(SELECT count(*) FROM ${visitors} WHERE ${visitors.tenantId} = ${profiles.id})`,
           productCount: sql<number>`(SELECT count(*) FROM ${products} WHERE ${products.tenantId} = ${profiles.id})`,
-          orderCount: sql<number>`(SELECT count(*) FROM ${orders} WHERE ${orders.tenantId} = ${profiles.id})`,
+          orderCount: sql<number>`(SELECT count(*) FROM ${orders} WHERE ${orders.tenantId} = ${profiles.id} AND ${orders.deletedAt} IS NULL)`,
         })
         .from(profiles)
         .leftJoin(users, eq(profiles.ownerUserId, users.id))
