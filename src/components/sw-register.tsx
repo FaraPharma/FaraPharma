@@ -25,8 +25,10 @@ export function SwRegister() {
 
   if (!offline) return null;
   return (
-    <div className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-white shadow" style={{ background: "linear-gradient(135deg, var(--amber-1), var(--amber-2))" }}>
-      <span>📴</span>
+    <div
+      className="fixed inset-x-0 top-0 z-50 px-4 py-2 text-center text-xs font-bold"
+      style={{ background: "var(--warning)", color: "var(--on-primary)" }}
+    >
       حالت آفلاین — داده‌های ذخیره‌شده نمایش داده می‌شود؛ ثبت تغییرات نیاز به اینترنت دارد
     </div>
   );

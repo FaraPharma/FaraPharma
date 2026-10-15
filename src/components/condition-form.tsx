@@ -1,5 +1,6 @@
 "use client";
 
+import { JalaliDatePicker } from "@/lib/jalali";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Modal, Field, Input, Select, Textarea, Button } from "@/components/ui";
@@ -152,18 +153,14 @@ export function ConditionForm({
           />
         </Field>
         <Field label="اعتبار شرایط تا تاریخ (اختیاری)">
-          <Input
-            type="date"
-            value={validUntil}
-            onChange={(e) => setValidUntil(e.target.value)}
-          />
+          <JalaliDatePicker value={validUntil} onChange={setValidUntil} />
         </Field>
 
         <div className="flex items-center justify-between pt-2">
           <p className="text-[11px] text-[color:var(--ink-soft)]">
             پیش‌نمایش: نقد {faNum(toNum(cashPct))}٪ · چک {faNum(toNum(checkDays))} روز
           </p>
-          <Button type="submit" variant="accent" disabled={busy}>
+          <Button type="submit" variant="primary" disabled={busy}>
             {busy ? "در حال ذخیره…" : "ذخیره شرایط"}
           </Button>
         </div>

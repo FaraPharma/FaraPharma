@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { daysLeft } from "@/lib/format";
+import { daysLeft, faNum } from "@/lib/format";
 
 const HIDDEN_PREFIXES = ["/login", "/register", "/privacy"];
 
@@ -88,10 +88,10 @@ export function ChequeReminders() {
           lastFired.add(c.id);
           const body =
             d < 0
-              ? `${c.visitorName} — ${c.amount.toLocaleString("fa-IR")} تومان، ${-d} روز از سررسید گذشته`
-              : `${c.visitorName} — ${c.amount.toLocaleString("fa-IR")} تومان، ${d} روز تا سررسید`;
+              ? `${c.visitorName} — ${c.amount.toLocaleString("fa-IR")} تومان، ${faNum(-d)} روز از سررسید گذشته`
+              : `${c.visitorName} — ${c.amount.toLocaleString("fa-IR")} تومان، ${faNum(d)} روز تا سررسید`;
           try {
-            new Notification("💳 چک نزدیک سررسید", {
+            new Notification("چک نزدیک سررسید", {
               body,
               tag: `cheque-${c.id}`,
             });

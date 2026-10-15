@@ -20,20 +20,20 @@ export function SubscriptionBanner({
   if (status === "active") {
     const left = daysLeft(profile.subscriptionEndsAt);
     return (
-      <div className="card flex items-center justify-between p-3" style={{ borderColor: "var(--teal-1)", background: "var(--mint-soft)" }}>
-        <div className="flex items-center gap-2">
-          <span className="text-lg">✅</span>
-          <div>
-            <div className="text-sm font-bold" style={{ color: "#0A7C6B" }}>اشتراک فعال</div>
-            <div className="text-[11px]" style={{ color: "#0A7C6B" }}>
-              {left !== null && left > 0
-                ? `تا ${faDate(profile.subscriptionEndsAt)} (${faNum(left)} روز مانده)`
-                : "نامحدود"}
-            </div>
+      <div
+        className="flex items-center justify-between gap-3 rounded-2xl px-4 py-3"
+        style={{ background: "var(--success-soft)", color: "var(--success-ink)" }}
+      >
+        <div>
+          <div className="text-sm font-bold">اشتراک فعال</div>
+          <div className="text-[11px]">
+            {left !== null && left > 0 && left < 3650
+              ? `تا ${faDate(profile.subscriptionEndsAt)} (${faNum(left)} روز مانده)`
+              : "نامحدود"}
           </div>
         </div>
         {!compact && (
-          <Link href="/settings" className="text-xs font-medium underline" style={{ color: "#0A7C6B" }}>
+          <Link href="/settings" className="flex min-h-11 items-center text-xs font-bold underline">
             جزئیات
           </Link>
         )}
@@ -46,42 +46,43 @@ export function SubscriptionBanner({
     const pct = Math.max(0, Math.min(100, Math.round((left / trialDays) * 100)));
     return (
       <div
-        className="rounded-2xl p-4 text-white shadow"
-        style={{ background: "linear-gradient(120deg, var(--teal-1), var(--cobalt-2))" }}
+        className="rounded-2xl px-4 py-3"
+        style={{ background: "var(--warning-soft)", color: "var(--warning-ink)" }}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🎁</span>
-            <div>
-              <div className="text-sm font-bold">دوره آزمایشی رایگان</div>
-              <div className="text-[11px] text-white/80">
-                {left > 0 ? `${faNum(left)} روز از ${faNum(trialDays)} روز باقی مانده` : "در حال پایان"}
-              </div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-bold">دوره آزمایشی رایگان</div>
+            <div className="text-[11px]">
+              {left > 0
+                ? `${faNum(left)} روز از ${faNum(trialDays)} روز باقی مانده`
+                : "در حال پایان"}
             </div>
           </div>
-          <Badge color="teal" className="border-white/30 bg-white/15 text-white">
-            {faNum(left)} روز
-          </Badge>
+          <Badge color="amber">{faNum(left)} روز</Badge>
         </div>
-        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/25">
-          <div className="h-full rounded-full bg-white" style={{ width: `${pct}%` }} />
+        <div
+          className="mt-3 h-1.5 overflow-hidden rounded-full"
+          style={{ background: "var(--surface)" }}
+        >
+          <div
+            className="h-full rounded-full"
+            style={{ width: `${pct}%`, background: "var(--warning)" }}
+          />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="rounded-2xl p-4" style={{ border: "1px solid #F0562F4d", background: "var(--coral-soft)" }}>
-      <div className="flex items-start gap-2">
-        <span className="text-lg">⛔</span>
-        <div className="flex-1">
-          <div className="text-sm font-bold" style={{ color: "#C43F1D" }}>اشتراک منقضی شده است</div>
-          <p className="mt-1 text-xs leading-5" style={{ color: "#C43F1D" }}>
-            مشاهده و خروجی‌گیری از داده‌ها فعال است، اما ثبت و ویرایش غیرفعال شده. برای
-            تمدید اشتراک با پشتیبانی تماس بگیرید.
-          </p>
-        </div>
-      </div>
+    <div
+      className="rounded-2xl px-4 py-3"
+      style={{ background: "var(--danger-soft)", color: "var(--danger-ink)" }}
+    >
+      <div className="text-sm font-bold">اشتراک منقضی شده است</div>
+      <p className="mt-1 text-xs leading-5">
+        مشاهده و خروجی‌گیری از داده‌ها فعال است، اما ثبت و ویرایش غیرفعال شده. برای تمدید اشتراک
+        با پشتیبانی تماس بگیرید.
+      </p>
     </div>
   );
 }

@@ -69,7 +69,7 @@ export function ConnectivityGuard({ children }: { children: React.ReactNode }) {
       <div className="card w-full max-w-sm p-6 text-center">
         <div
           className="mx-auto mb-4 grid size-14 place-items-center rounded-full"
-          style={{ background: "var(--coral-soft)", color: "#C43F1D" }}
+          style={{ background: "var(--danger-soft)", color: "var(--danger-ink)" }}
         >
           <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 3l18 18" />

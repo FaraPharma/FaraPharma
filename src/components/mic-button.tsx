@@ -20,10 +20,10 @@ export function MicButton({
       type="button"
       onClick={listening ? stop : start}
       aria-label="ورودی صوتی"
-      className={className ?? "grid size-8 shrink-0 place-items-center rounded-full transition"}
+      className={className ?? "grid size-11 shrink-0 place-items-center rounded-full transition"}
       style={{
-        background: listening ? "var(--coral-soft)" : "var(--line)",
-        color: listening ? "#C43F1D" : "var(--ink-soft)",
+        background: listening ? "var(--danger-soft)" : "var(--line)",
+        color: listening ? "var(--danger-ink)" : "var(--ink-soft)",
       }}
     >
       {listening ? (

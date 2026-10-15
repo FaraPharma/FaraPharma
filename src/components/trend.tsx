@@ -22,13 +22,13 @@ function Sparkline({ values }: { values: number[] }) {
       <polyline
         points={pts.map((p) => p.map((n) => n.toFixed(1)).join(",")).join(" ")}
         fill="none"
-        stroke="#0d9488"
+        stroke="var(--primary)"
         strokeWidth="1.5"
         strokeLinejoin="round"
         strokeLinecap="round"
       />
       {pts.map((p, i) => (
-        <circle key={i} cx={p[0]} cy={p[1]} r="2" fill="#0d9488" />
+        <circle key={i} cx={p[0]} cy={p[1]} r="2" fill="var(--primary)" />
       ))}
     </svg>
   );
@@ -68,7 +68,7 @@ export function TrendPanel({
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1 text-[10px] font-medium text-[color:var(--ink-soft)] transition hover:text-[color:var(--ink)]"
       >
-        📈 تاریخچه شرایط ({faNum((history?.length ?? 0) + (current ? 1 : 0))} ثبت){" "}
+        تاریخچه شرایط ({faNum((history?.length ?? 0) + (current ? 1 : 0))} ثبت){" "}
         {open ? "▲" : "▼"}
       </button>
       {open && (
@@ -83,8 +83,8 @@ export function TrendPanel({
           </div>
           <div className="max-h-44 space-y-1 overflow-y-auto pe-1">
             {current && (
-              <div className="flex flex-wrap items-center gap-1 rounded-lg border border-[color:var(--teal-1)] bg-[color:var(--mint-soft)] px-2 py-1.5 text-[10px] text-[color:var(--ink-soft)]">
-                <span className="font-bold text-[color:#0A7C6B]">اکنون</span>
+              <div className="flex flex-wrap items-center gap-1 rounded-lg border border-[color:var(--primary)] bg-[color:var(--primary-soft)] px-2 py-1.5 text-[10px] text-[color:var(--ink-soft)]">
+                <span className="font-bold text-[color:var(--primary-dark)]">اکنون</span>
                 <Badge color="blue">نقد {faNum(current.cashDiscountPct)}٪</Badge>
                 {current.checkDays > 0 && (
                   <Badge color="violet">چک {faNum(current.checkDays)}</Badge>
@@ -102,7 +102,7 @@ export function TrendPanel({
                   <Badge color="blue">نقد {faNum(h.cashDiscountPct)}٪</Badge>
                   {h.checkDays > 0 && <Badge color="violet">چک {faNum(h.checkDays)}</Badge>}
                   <Badge color={sm?.color ?? "slate"}>{sm?.label ?? h.stock}</Badge>
-                  {h.offer && <span className="truncate">🎁 {h.offer}</span>}
+                  {h.offer && <span className="truncate">{h.offer}</span>}
                   {h.validUntil && (
                     <span className="text-[color:var(--ink-soft)]">تا {faDateShort(h.validUntil)}</span>
                   )}

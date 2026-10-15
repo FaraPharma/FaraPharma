@@ -62,7 +62,7 @@ export function RegisterInstall({ trigger }: { trigger: boolean }) {
     try {
       await p.prompt();
       const choice = await p.userChoice;
-      if (choice.outcome === "accepted") toast.success("اپ نصب شد 🎉");
+      if (choice.outcome === "accepted") toast.success("اپ نصب شد");
     } catch {
       /* کاربر منصرف شد */
     }
@@ -76,9 +76,9 @@ export function RegisterInstall({ trigger }: { trigger: boolean }) {
   // iOS/سافاری → راهنمای متنی
   if (ios) {
     return (
-      <div className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface,#F8F4EC)] p-4 text-center">
-        <p className="text-xs leading-6 text-[color:var(--ink-soft,#6b6157)]">
-          📲 <b className="text-[color:var(--ink,#241D17)]">نصب روی آیفون/آی‌پد:</b> در سافاری، از دکمه‌ی
+      <div className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg)] p-4 text-center">
+        <p className="text-xs leading-6 text-[color:var(--ink-soft)]">
+          <b className="text-[color:var(--ink)]">نصب روی آیفون/آی‌پد:</b> در سافاری، از دکمه‌ی
           اشتراک‌گذاری، گزینه‌ی «افزودن به صفحه‌ی اصلی» را بزنید
         </p>
       </div>
@@ -88,7 +88,7 @@ export function RegisterInstall({ trigger }: { trigger: boolean }) {
   if (hasPrompt) {
     return (
       <Button onClick={install} variant="secondary" className="w-full">
-        📲 نصب اپلیکیشن روی گوشی
+        نصب اپلیکیشن روی گوشی
       </Button>
     );
   }
@@ -96,9 +96,9 @@ export function RegisterInstall({ trigger }: { trigger: boolean }) {
   // راهنمای دستی همیشگی — وقتی مرورگر رویداد خودکار نصب را ارسال نکرده باشد
   if (showManualGuide) {
     return (
-      <div className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface,#F8F4EC)] p-4 text-center">
-        <p className="text-xs leading-6 text-[color:var(--ink-soft,#6b6157)]">
-          📲 <b className="text-[color:var(--ink,#241D17)]">نصب روی گوشی:</b> از منوی سه‌نقطه‌ی بالای
+      <div className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg)] p-4 text-center">
+        <p className="text-xs leading-6 text-[color:var(--ink-soft)]">
+          <b className="text-[color:var(--ink)]">نصب روی گوشی:</b> از منوی سه‌نقطه‌ی بالای
           مرورگر، گزینه‌ی «Install app» یا «افزودن به صفحه‌ی اصلی» را بزنید
         </p>
       </div>

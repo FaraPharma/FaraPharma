@@ -1,5 +1,6 @@
 "use client";
 
+import { IconClose } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toman } from "@/lib/format";
@@ -90,7 +91,7 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
 
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-4 pt-16 backdrop-blur-[2px]"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-[color:var(--scrim)] p-4 pt-16 backdrop-blur-[2px]"
           onClick={() => setOpen(false)}
         >
           <div
@@ -111,7 +112,7 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                 className="flex-1 bg-transparent text-sm outline-none"
                 style={{ color: "var(--ink)" }}
               />
-              <button onClick={() => setOpen(false)} style={{ color: "var(--ink-soft)" }}>✕</button>
+              <button onClick={() => setOpen(false)} aria-label="بستن" className="grid size-11 place-items-center" style={{ color: "var(--ink-soft)" }}><IconClose className="size-5" /></button>
             </div>
 
             <div className="max-h-[60vh] overflow-y-auto p-3">
@@ -158,7 +159,7 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                             {p.productName} <span style={{ color: "var(--ink-soft)" }}>— {p.visitorName}</span>
                           </span>
                           {p.price != null && (
-                            <span className="tnum shrink-0 text-[11px] font-bold" style={{ color: "#0A7C6B" }}>
+                            <span className="tnum shrink-0 text-[11px] font-bold" style={{ color: "var(--primary-dark)" }}>
                               {toman(p.price)}
                             </span>
                           )}

@@ -55,7 +55,7 @@ export function InstallButton() {
     try {
       await p.prompt();
       const choice = await p.userChoice;
-      if (choice.outcome === "accepted") toast.success("اپ نصب شد 🎉");
+      if (choice.outcome === "accepted") toast.success("اپ نصب شد");
     } catch {
       /* کاربر منصرف شد */
     }
@@ -65,8 +65,8 @@ export function InstallButton() {
 
   if (installed) {
     return (
-      <p className="text-xs font-medium" style={{ color: "var(--teal-2)" }}>
-        ✓ اپ روی دستگاه نصب شده است
+      <p className="text-xs font-medium" style={{ color: "var(--primary-dark)" }}>
+        اپ روی دستگاه نصب شده است
       </p>
     );
   }
@@ -75,7 +75,7 @@ export function InstallButton() {
     return (
       <div className="rounded-2xl border p-3" style={{ borderColor: "var(--line)", background: "var(--bg)" }}>
         <p className="text-[11px] leading-6" style={{ color: "var(--ink-soft)" }}>
-          📲 در سافاری، از دکمه‌ی اشتراک‌گذاری، گزینه‌ی «افزودن به صفحه‌ی اصلی» را بزنید
+          در سافاری، از دکمه‌ی اشتراک‌گذاری، گزینه‌ی «افزودن به صفحه‌ی اصلی» را بزنید
         </p>
       </div>
     );
@@ -84,7 +84,7 @@ export function InstallButton() {
   if (hasPrompt) {
     return (
       <Button onClick={install} className="w-full">
-        📲 نصب روی صفحه اصلی گوشی
+        نصب روی صفحه اصلی گوشی
       </Button>
     );
   }
@@ -93,7 +93,7 @@ export function InstallButton() {
     return (
       <div className="rounded-2xl border p-3" style={{ borderColor: "var(--line)", background: "var(--bg)" }}>
         <p className="text-[11px] leading-6" style={{ color: "var(--ink-soft)" }}>
-          📲 از منوی سه‌نقطه‌ی بالای مرورگر، گزینه‌ی «Install app» یا «افزودن به صفحه‌ی اصلی» را بزنید
+          از منوی سه‌نقطه‌ی بالای مرورگر، گزینه‌ی «Install app» یا «افزودن به صفحه‌ی اصلی» را بزنید
         </p>
       </div>
     );

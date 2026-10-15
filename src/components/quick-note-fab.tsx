@@ -1,5 +1,6 @@
 "use client";
 
+import { IconClose } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -83,10 +84,10 @@ export function QuickNoteFab() {
       <button
         onClick={() => setOpen(true)}
         aria-label="یادداشت سریع"
-        className="fixed bottom-5 left-5 z-40 grid size-14 place-items-center rounded-full text-white shadow-lg transition active:scale-95"
+        className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-4 z-40 grid size-14 place-items-center rounded-full text-[color:var(--on-primary)] shadow-lg transition active:scale-95"
         style={{
-          background: "linear-gradient(135deg, var(--cobalt-2), var(--teal-1))",
-          boxShadow: "0 10px 24px rgba(20,60,90,.35)",
+          background: "var(--primary)",
+          boxShadow: "var(--shadow-raised)",
         }}
       >
         <svg
@@ -105,7 +106,7 @@ export function QuickNoteFab() {
 
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-[2px] sm:items-center"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-[color:var(--scrim)] backdrop-blur-[2px] sm:items-center"
           onClick={() => setOpen(false)}
         >
           <div
@@ -121,7 +122,7 @@ export function QuickNoteFab() {
                 className="grid size-8 place-items-center rounded-full"
                 style={{ background: "var(--line)", color: "var(--ink-soft)" }}
               >
-                ✕
+                <IconClose className="size-5" />
               </button>
             </div>
             <div className="relative">
