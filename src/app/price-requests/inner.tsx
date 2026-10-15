@@ -16,6 +16,7 @@ import {
   Textarea,
   Spinner,
   EmptyState,
+  AddButton,
 } from "@/components/ui";
 import {
   createRequestAction,
@@ -301,15 +302,13 @@ export function PriceRequestsInner() {
         title="درخواست قیمت"
         subtitle="متن آماده برای ویزیتورها + جدول مقایسه زنده (ویزیتور × کالا)"
         action={
-          <Button onClick={() => setNewOpen(true)} className="px-3 py-2 text-xs">
-            + درخواست جدید
-          </Button>
+          <AddButton onClick={() => setNewOpen(true)}>درخواست جدید</AddButton>
         }
       />
 
       {error && (
-        <p className="rounded-xl bg-[color:var(--amber-soft)] px-3 py-2 text-xs font-medium text-[color:#8A5A0E]">
-          ⚠️ {error}
+        <p className="rounded-xl bg-[color:var(--warning-soft)] px-3 py-2 text-xs font-medium text-[color:var(--warning-ink)]">
+          {error}
         </p>
       )}
 
@@ -317,7 +316,6 @@ export function PriceRequestsInner() {
 
       {(data?.requests.length ?? 0) === 0 ? (
         <EmptyState
-          icon="💰"
           title="درخواست قیمتی ثبت نشده"
           desc="درخواست بسازید، متنش را برای ویزیتورها بفرستید و پاسخ‌ها را مقایسه کنید"
         />
@@ -384,7 +382,7 @@ export function PriceRequestsInner() {
                         else next.delete(p.id);
                         setPicked(next);
                       }}
-                      className="size-4 accent-[#12AC93]"
+                      className="size-4 accent-[var(--primary)]"
                     />
                     <span className="flex-1">{p.name}</span>
                     {p.code && <span className="text-[10px] text-[color:var(--ink-soft)]" dir="ltr">{p.code}</span>}
@@ -405,7 +403,7 @@ export function PriceRequestsInner() {
               className="min-h-16"
             />
           </Field>
-          <Button type="submit" variant="accent" disabled={busy} className="w-full">
+          <Button type="submit" variant="primary" disabled={busy} className="w-full">
             {busy ? "در حال ساخت…" : "ساخت درخواست و دریافت متن آماده"}
           </Button>
         </form>
@@ -420,7 +418,7 @@ export function PriceRequestsInner() {
             </pre>
             <div className="flex gap-2">
               <Button onClick={() => copy(requestText(share))} className="flex-1">
-                📋 کپی متن
+                کپی متن
               </Button>
               <Button
                 variant="secondary"
@@ -444,9 +442,9 @@ export function PriceRequestsInner() {
                       href={whatsappUrl(v.phone, requestText(share))}
                       target="_blank"
                       rel="noreferrer"
-                      className="rounded-full border border-[color:var(--teal-1)] bg-[color:var(--mint-soft)] px-3 py-1.5 text-xs font-medium text-[color:#0A7C6B]"
+                      className="rounded-full border border-[color:var(--primary)] bg-[color:var(--primary-soft)] px-3 py-1.5 text-xs font-medium text-[color:var(--primary-dark)]"
                     >
-                      💬 {v.name}
+                      {v.name}
                     </a>
                   ) : null
                 )}
@@ -465,9 +463,9 @@ export function PriceRequestsInner() {
               {/* راه همیشگی: کپی متن برای ارسال دستی */}
               <button
                 onClick={() => copy(requestText(share))}
-                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-[color:var(--line)] bg-white px-3 py-2 text-xs font-medium text-[color:var(--ink)] transition active:scale-[0.98]"
+                className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-[color:var(--line)] bg-[color:var(--surface)] px-3 py-2 text-xs font-medium text-[color:var(--ink)] transition active:scale-[0.98]"
               >
-                📋 کپی متن برای ارسال دستی
+                کپی متن برای ارسال دستی
               </button>
 
               {/* ویزیتورهایی که آیدی پیام‌رسان دارند: لینک مستقیم چت + کپی */}
@@ -493,15 +491,15 @@ export function PriceRequestsInner() {
                           href={telegramUrl(v.messengerUsername)}
                           target="_blank"
                           rel="noreferrer"
-                          className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-medium text-sky-700 transition active:scale-95"
+                          className="rounded-full border border-[color:var(--line)] bg-[color:var(--primary-soft)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--primary-dark)] transition active:scale-95"
                         >
-                          ✈️ تلگرام
+                          تلگرام
                         </a>
                         <a
                           href={baleUrl(v.messengerUsername)}
                           target="_blank"
                           rel="noreferrer"
-                          className="rounded-full border border-[color:var(--teal-1)] bg-[color:var(--mint-soft)] px-2.5 py-1 text-[11px] font-medium text-[color:#0A7C6B] transition active:scale-95"
+                          className="rounded-full border border-[color:var(--primary)] bg-[color:var(--primary-soft)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--primary-dark)] transition active:scale-95"
                         >
                           🅱️ بله
                         </a>
@@ -509,15 +507,15 @@ export function PriceRequestsInner() {
                           href={rubikaUrl(v.messengerUsername)}
                           target="_blank"
                           rel="noreferrer"
-                          className="rounded-full border border-[#F0562F]/30 bg-[color:var(--coral-soft)] px-2.5 py-1 text-[11px] font-medium text-[color:#C43F1D] transition active:scale-95"
+                          className="rounded-full border border-[color:var(--danger)]/30 bg-[color:var(--danger-soft)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--danger-ink)] transition active:scale-95"
                         >
-                          🔴 روبیکا
+                          روبیکا
                         </a>
                         <button
                           onClick={() => copy(requestText(share))}
-                          className="rounded-full border border-[color:var(--line)] bg-white px-2.5 py-1 text-[11px] font-medium text-[color:var(--ink-soft)] transition active:scale-95"
+                          className="rounded-full border border-[color:var(--line)] bg-[color:var(--surface)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--ink-soft)] transition active:scale-95"
                         >
-                          📋 کپی متن
+                          کپی متن
                         </button>
                       </div>
                     </div>
@@ -545,13 +543,13 @@ export function PriceRequestsInner() {
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => copy(requestText(detail))}>
-                📋 کپی متن درخواست
+                کپی متن درخواست
               </Button>
               <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => toggle(detail)}>
                 {detail.status === "open" ? "بستن درخواست" : "بازگشایی"}
               </Button>
-              <Button variant="ghost" className="px-3 py-1.5 text-xs text-[color:#C43F1D]" onClick={() => remove(detail)}>
-                🗑 حذف
+              <Button variant="ghost" className="px-3 py-1.5 text-xs text-[color:var(--danger-ink)]" onClick={() => remove(detail)}>
+                حذف
               </Button>
             </div>
 
@@ -589,7 +587,7 @@ export function PriceRequestsInner() {
                             className="px-2 py-1 text-[11px]"
                             onClick={() => openRespForm(detail.id, v.id)}
                           >
-                            ✏️ ویرایش پاسخ‌ها
+                            ویرایش پاسخ‌ها
                           </Button>
                           <Button
                             variant="secondary"
@@ -597,7 +595,7 @@ export function PriceRequestsInner() {
                             disabled={busy}
                             onClick={() => orderFrom(v.id, vResponses)}
                           >
-                            🧾 سفارش
+                            سفارش
                           </Button>
                         </div>
                       </div>
@@ -610,7 +608,7 @@ export function PriceRequestsInner() {
                               key={it.productId}
                               className={cn(
                                 "flex items-start justify-between gap-2 px-3 py-2",
-                                best && "bg-[color:var(--mint-soft)]/70"
+                                best && "bg-[color:var(--primary-soft)]/70"
                               )}
                             >
                               <div className="min-w-0">
@@ -618,7 +616,7 @@ export function PriceRequestsInner() {
                                   <span className="text-xs font-medium text-[color:var(--ink)]">
                                     {it.productName}
                                   </span>
-                                  {best && <Badge color="green">✅ بهترین قیمت این کالا</Badge>}
+                                  {best && <Badge color="green">بهترین قیمت این کالا</Badge>}
                                 </div>
                                 {r ? (
                                   <div className="mt-1 flex flex-wrap gap-1 text-[10px]">
@@ -626,7 +624,7 @@ export function PriceRequestsInner() {
                                     {r.stock && <Badge color="slate">{STOCK_LABEL[r.stock] ?? r.stock}</Badge>}
                                     {r.checkDays ? <Badge color="violet">چک {faNum(r.checkDays)} روز</Badge> : null}
                                     {r.cashDiscountPct ? <Badge color="teal">نقد {faNum(r.cashDiscountPct)}٪</Badge> : null}
-                                    {r.offer && <span className="text-[color:var(--ink-soft)]">🎁 {r.offer}</span>}
+                                    {r.offer && <span className="text-[color:var(--ink-soft)]">{r.offer}</span>}
                                   </div>
                                 ) : (
                                   <p className="mt-1 text-[10px] text-[color:var(--ink-soft)]">پاسخی برای این کالا ثبت نشده</p>
