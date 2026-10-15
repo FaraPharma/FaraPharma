@@ -17,6 +17,8 @@ import {
   Select,
   Spinner,
   EmptyState,
+  AddButton,
+  RefreshButton,
 } from "@/components/ui";
 import { ConditionForm } from "@/components/condition-form";
 import {
@@ -298,19 +300,15 @@ export default function ProductsPage() {
         subtitle="از کی بخرم؟ شرایط همه ویزیتورها، مرتب‌شده بر اساس بهترین ترکیب"
         action={
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => load()} className="px-3 py-2 text-xs">
-              ⟳
-            </Button>
+            <RefreshButton onClick={() => load()} />
             <Button
               variant="secondary"
               onClick={() => fileRef.current?.click()}
-              className="px-3 py-2 text-xs"
+              className="px-3 text-xs"
             >
-              📊 اکسل
+              اکسل
             </Button>
-            <Button onClick={openAdd} className="px-3 py-2 text-xs">
-              + کالا
-            </Button>
+            <AddButton onClick={openAdd}>کالا</AddButton>
             <input
               ref={fileRef}
               type="file"
@@ -326,15 +324,14 @@ export default function ProductsPage() {
       />
 
       {error && (
-        <p className="rounded-xl bg-[color:var(--amber-soft)] px-3 py-2 text-xs font-medium text-[color:#8A5A0E]">
-          ⚠️ {error}
+        <p className="rounded-xl bg-[color:var(--warning-soft)] px-3 py-2 text-xs font-medium text-[color:var(--warning-ink)]">
+          {error}
         </p>
       )}
 
       <OfflineBadge stale={stale} savedAt={savedAt} />
 
       <div className="card flex items-center gap-2 p-2">
-        <span className="ps-1 text-lg">🔎</span>
         <input
           className="w-full bg-transparent text-sm outline-none placeholder:text-[color:var(--ink-soft)]"
           placeholder="نام کالا، کد یا نام ویزیتور/شرکت…"
@@ -344,18 +341,18 @@ export default function ProductsPage() {
       </div>
 
       {/* ---------- پنل فیلترها (آکاردئون موبایلی) ---------- */}
-      <div className="overflow-hidden rounded-2xl border border-[color:var(--line)] bg-white shadow-sm">
+      <div className="overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface)] shadow-sm">
         <button
           onClick={() => setFiltersOpen((o) => !o)}
           className={cn(
             "flex w-full items-center justify-between px-4 py-3 text-sm font-medium transition",
-            filtersOpen ? "bg-[color:var(--line)]" : "bg-white"
+            filtersOpen ? "bg-[color:var(--line)]" : "bg-[color:var(--surface)]"
           )}
         >
-          <span className={cn("flex items-center gap-2", filtersActive && "text-[color:#0A7C6B]")}>
-            ⚙️ فیلتر شرایط خرید
+          <span className={cn("flex items-center gap-2", filtersActive && "text-[color:var(--primary-dark)]")}>
+            فیلتر شرایط خرید
             {filtersActive && (
-              <span className="grid size-5 place-items-center rounded-full bg-[color:var(--teal-2)] text-[10px] font-bold text-white">
+              <span className="grid size-5 place-items-center rounded-full bg-[color:var(--primary-dark)] text-[10px] font-bold text-[color:var(--on-primary)]">
                 {faNum(activeFilterCount)}
               </span>
             )}
@@ -382,8 +379,8 @@ export default function ProductsPage() {
                     className={cn(
                       "flex-1 rounded-full px-2 py-1.5 text-[11px] font-medium transition",
                       minCashPct === opt.v
-                        ? "bg-[color:var(--teal-2)] text-white"
-                        : "border border-[color:var(--line)] bg-white text-[color:var(--ink-soft)]"
+                        ? "bg-[color:var(--primary-dark)] text-[color:var(--on-primary)]"
+                        : "border border-[color:var(--line)] bg-[color:var(--surface)] text-[color:var(--ink-soft)]"
                     )}
                   >
                     {opt.l}
@@ -408,8 +405,8 @@ export default function ProductsPage() {
                     className={cn(
                       "flex-1 rounded-full px-2 py-1.5 text-[11px] font-medium transition",
                       checkFilter === opt.v
-                        ? "bg-[color:var(--teal-2)] text-white"
-                        : "border border-[color:var(--line)] bg-white text-[color:var(--ink-soft)]"
+                        ? "bg-[color:var(--primary-dark)] text-[color:var(--on-primary)]"
+                        : "border border-[color:var(--line)] bg-[color:var(--surface)] text-[color:var(--ink-soft)]"
                     )}
                   >
                     {opt.l}
@@ -447,9 +444,9 @@ export default function ProductsPage() {
             {filtersActive && (
               <button
                 onClick={resetFilters}
-                className="w-full rounded-xl border border-[color:var(--line)] py-2 text-[11px] font-medium text-[color:var(--ink-soft)] transition hover:border-[color:#F0562F]/30 hover:text-[color:#C43F1D]"
+                className="w-full rounded-xl border border-[color:var(--line)] py-2 text-[11px] font-medium text-[color:var(--ink-soft)] transition hover:border-[color:var(--danger)]/30 hover:text-[color:var(--danger-ink)]"
               >
-                ✕ حذف همه فیلترها
+                حذف همه فیلترها
               </button>
             )}
           </div>
@@ -464,8 +461,8 @@ export default function ProductsPage() {
             className={cn(
               "shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition",
               cat === c
-                ? "bg-[color:var(--teal-2)] text-white"
-                : "border border-[color:var(--line)] bg-white text-[color:var(--ink-soft)]"
+                ? "bg-[color:var(--primary-dark)] text-[color:var(--on-primary)]"
+                : "border border-[color:var(--line)] bg-[color:var(--surface)] text-[color:var(--ink-soft)]"
             )}
           >
             {c === "all" ? "همه" : CATEGORIES[c as CategoryKey]}
@@ -475,7 +472,6 @@ export default function ProductsPage() {
 
       {filtered.length === 0 ? (
         <EmptyState
-          icon="📦"
           title={q || cat !== "all" ? "کالایی پیدا نشد" : "هنوز کالایی ثبت نشده"}
           desc="با دکمه «+ کالا» اولین کالا را ثبت کنید"
         />
@@ -504,7 +500,7 @@ export default function ProductsPage() {
                     </div>
                     <div className="mt-1 flex items-center gap-2">
                       <Badge color="violet">{CATEGORIES[p.category as CategoryKey] ?? p.category}</Badge>
-                      {p.isShort && <Badge color="red">⚠️ کسری</Badge>}
+                      {p.isShort && <Badge color="red">کسری</Badge>}
                       <span className="text-[11px] text-[color:var(--ink-soft)]">
                         {filtersActive
                           ? `${faNum(conds.length)} ویزیتور با این فیلترها`
@@ -512,8 +508,8 @@ export default function ProductsPage() {
                       </span>
                     </div>
                     {best ? (
-                      <div className="mt-2 rounded-xl bg-[color:var(--mint-soft)]/70 px-3 py-2 text-[11px] leading-5 text-[color:#0A7C6B]">
-                        🏆 <b>{best.visitorName}</b>
+                      <div className="mt-2 rounded-xl bg-[color:var(--primary-soft)]/70 px-3 py-2 text-[11px] leading-5 text-[color:var(--primary-dark)]">
+                        <b>{best.visitorName}</b>
                         {best.visitorCompany ? ` (${best.visitorCompany})` : ""} ·{" "}
                         {STOCK_BADGE[best.stock]?.label ?? best.stock}
                         {best.cashDiscountPct > 0 && <> · نقد {faNum(best.cashDiscountPct)}٪</>}
@@ -535,11 +531,11 @@ export default function ProductsPage() {
                       className={cn(
                         "shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold transition",
                         p.isShort
-                          ? "bg-[color:var(--coral-soft)] text-[color:#C43F1D]"
-                          : "bg-[color:var(--line)] text-[color:var(--ink-soft)] hover:bg-[color:var(--coral-soft)] hover:text-[color:#C43F1D]"
+                          ? "bg-[color:var(--danger-soft)] text-[color:var(--danger-ink)]"
+                          : "bg-[color:var(--line)] text-[color:var(--ink-soft)] hover:bg-[color:var(--danger-soft)] hover:text-[color:var(--danger-ink)]"
                       )}
                     >
-                      {p.isShort ? "⚠️ کسری دارم" : "کسری دارم؟"}
+                      {p.isShort ? "کسری دارم" : "کسری دارم؟"}
                     </button>
                     <span className="text-[color:var(--ink-soft)]">‹</span>
                   </div>
@@ -566,7 +562,7 @@ export default function ProductsPage() {
                   router.push(`/price-requests?new=1&product=${compareProduct.id}`);
                 }}
               >
-                💰 درخواست قیمت برای این کالا
+                درخواست قیمت برای این کالا
               </Button>
               <Button
                 variant="secondary"
@@ -585,12 +581,11 @@ export default function ProductsPage() {
             {filteredConditions(compareProduct.id).length === 0 ? (
               filtersActive ? (
                 <EmptyState
-                  icon="🔍"
                   title="ویزیتوری با این فیلترها پیدا نشد"
                   desc="فیلترها را تغییر دهید یا «حذف همه فیلترها» را بزنید"
                 />
               ) : (
-                <EmptyState icon="🤝" title="شرایطی ثبت نشده" desc="از دکمه بالا اولین شرط را ثبت کنید" />
+                <EmptyState title="شرایطی ثبت نشده" desc="از دکمه بالا اولین شرط را ثبت کنید" />
               )
             ) : (
               <div className="space-y-2">
@@ -605,13 +600,13 @@ export default function ProductsPage() {
                         key={c.id}
                         className={cn(
                           "rounded-2xl border p-3",
-                          idx === 0 ? "border-[color:var(--teal-1)] bg-[color:var(--mint-soft)]" : "border-[color:var(--line)] bg-white"
+                          idx === 0 ? "border-[color:var(--primary)] bg-[color:var(--primary-soft)]" : "border-[color:var(--line)] bg-[color:var(--surface)]"
                         )}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              {idx === 0 && <Badge color="teal">🏆 پیشنهاد اول</Badge>}
+                              {idx === 0 && <Badge color="teal">پیشنهاد اول</Badge>}
                               <span className="text-sm font-bold text-[color:var(--ink)]">{c.visitorName}</span>
                               {c.visitorCompany && (
                                 <span className="text-[11px] text-[color:var(--ink-soft)]">{c.visitorCompany}</span>
@@ -634,7 +629,7 @@ export default function ProductsPage() {
                             </div>
                             {c.offer && (
                               <p className="mt-1.5 text-[11px] leading-4 text-[color:var(--ink-soft)]">
-                                🎁 {c.offer}
+                                {c.offer}
                               </p>
                             )}
                             <TrendPanel
@@ -658,19 +653,17 @@ export default function ProductsPage() {
                                   className="grid size-7 place-items-center rounded-lg bg-[color:var(--line)] text-xs"
                                   onClick={(e) => e.stopPropagation()}
                                 >
-                                  📞
-                                </a>
+                                                                  </a>
                               )}
                               {wa && (
                                 <a
                                   href={wa}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="grid size-7 place-items-center rounded-lg bg-[color:var(--mint-soft)] text-xs"
+                                  className="grid size-7 place-items-center rounded-lg bg-[color:var(--primary-soft)] text-xs"
                                   onClick={(e) => e.stopPropagation()}
                                 >
-                                  💬
-                                </a>
+                                                                  </a>
                               )}
                               <button
                                 onClick={() =>
@@ -678,14 +671,12 @@ export default function ProductsPage() {
                                 }
                                 className="grid size-7 place-items-center rounded-lg bg-[color:var(--line)] text-xs"
                               >
-                                ✏️
-                              </button>
+                                                              </button>
                               <button
                                 onClick={() => removeCondition(c.id)}
-                                className="grid size-7 place-items-center rounded-lg bg-[color:var(--coral-soft)] text-xs"
+                                className="grid size-7 place-items-center rounded-lg bg-[color:var(--danger-soft)] text-xs"
                               >
-                                🗑
-                              </button>
+                                                              </button>
                             </div>
                           </div>
                         </div>
@@ -697,7 +688,7 @@ export default function ProductsPage() {
 
             {compareProduct && (
               <div className="flex items-center justify-between gap-2 border-t border-[color:var(--line)] pt-3">
-                <Button variant="ghost" className="text-xs text-[color:#C43F1D]" onClick={() => removeProduct(compareProduct)}>
+                <Button variant="ghost" className="text-xs text-[color:var(--danger-ink)]" onClick={() => removeProduct(compareProduct)}>
                   غیرفعال کردن کالا
                 </Button>
                 <Button
@@ -705,18 +696,18 @@ export default function ProductsPage() {
                   className={cn(
                     "text-xs",
                     compareProduct.isShort &&
-                      "border-[color:#F0562F]/30 bg-[color:var(--coral-soft)] text-[color:#C43F1D]"
+                      "border-[color:var(--danger)]/30 bg-[color:var(--danger-soft)] text-[color:var(--danger-ink)]"
                   )}
                   onClick={() => toggleShort(compareProduct)}
                 >
-                  {compareProduct.isShort ? "✅ رفع کسری" : "⚠️ کسری دارم"}
+                  {compareProduct.isShort ? "رفع کسری" : "کسری دارم"}
                 </Button>
                 <Button
                   variant="secondary"
                   className="text-xs"
                   onClick={() => openEdit(compareProduct)}
                 >
-                  ✏️ ویرایش کالا
+                  ویرایش کالا
                 </Button>
               </div>
             )}
@@ -768,8 +759,8 @@ export default function ProductsPage() {
         ) : showManual ? (
           <div className="space-y-3">
             {qnText && (
-              <div className="rounded-xl border border-[color:var(--teal-1)] bg-[color:var(--mint-soft)] px-3 py-2 text-[11px] leading-5 text-[color:#0A7C6B]">
-                📝 از یادداشت: <span className="font-medium">{qnText}</span>
+              <div className="rounded-xl border border-[color:var(--primary)] bg-[color:var(--primary-soft)] px-3 py-2 text-[11px] leading-5 text-[color:var(--primary-dark)]">
+                از یادداشت: <span className="font-medium">{qnText}</span>
               </div>
             )}
             <form onSubmit={saveProduct} className="space-y-3">
@@ -799,7 +790,7 @@ export default function ProductsPage() {
                   <option value="equipment">تجهیزات</option>
                 </Select>
               </Field>
-              <Button type="submit" variant="accent" disabled={busy} className="w-full">
+              <Button type="submit" variant="primary" disabled={busy} className="w-full">
                 {busy ? "در حال ذخیره…" : "افزودن دستی کالا"}
               </Button>
             </form>
@@ -814,7 +805,6 @@ export default function ProductsPage() {
         ) : (
           <div className="space-y-3">
             <div className="card flex items-center gap-2 p-2">
-              <span className="ps-1">🔎</span>
               <input
                 className="w-full bg-transparent text-sm outline-none placeholder:text-[color:var(--ink-soft)]"
                 placeholder="جستجوی زنده در کاتالوگ مشترک (۲۵۰+ کالای پرکاربرد)…"
@@ -858,9 +848,9 @@ export default function ProductsPage() {
                 setForm({ name: baseQ.trim(), code: "", category: "cosmetic" });
                 setShowManual(true);
               }}
-              className="w-full rounded-xl border border-dashed border-[color:var(--line)] px-3 py-2.5 text-xs font-medium text-[color:var(--ink-soft)] transition hover:border-[color:var(--teal-1)] hover:text-[color:#0A7C6B]"
+              className="w-full rounded-xl border border-dashed border-[color:var(--line)] px-3 py-2.5 text-xs font-medium text-[color:var(--ink-soft)] transition hover:border-[color:var(--primary)] hover:text-[color:var(--primary-dark)]"
             >
-              ↪ در کاتالوگ پیدا نشد؟ افزودن دستی
+              در کاتالوگ پیدا نشد؟ افزودن دستی
             </button>
           </div>
         )}
