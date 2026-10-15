@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useOfflineData } from "@/hooks/useOfflineData";
 import { OfflineBadge } from "@/components/offline-badge";
-import { PageHeader, Button, Badge, Spinner, EmptyState } from "@/components/ui";
+import { PageHeader, Button, Badge, Spinner, EmptyState, RefreshButton } from "@/components/ui";
 import { setShortageAction } from "@/actions/shortages";
 import { createRequestAction } from "@/actions/priceRequests";
 import { faDateTime, faNum } from "@/lib/format";
@@ -76,24 +76,21 @@ export default function ShortagesPage() {
         subtitle="کالاهایی که «کسری دارم» علامت زده‌اید — مستقیم به درخواست قیمت بروید"
         action={
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => load()} className="px-3 py-2 text-xs">
-              ⟳
-            </Button>
+            <RefreshButton onClick={() => load()} />
             <Button
-              variant="accent"
               onClick={makeRequest}
               disabled={busy || products.length === 0}
-              className="px-3 py-2 text-xs"
+              className="px-4 text-sm"
             >
-              💰 ساخت درخواست قیمت
+              ساخت درخواست قیمت
             </Button>
           </div>
         }
       />
 
       {error && (
-        <p className="rounded-xl bg-[color:var(--amber-soft)] px-3 py-2 text-xs font-medium text-[color:#8A5A0E]">
-          ⚠️ {error}
+        <p className="rounded-xl bg-[color:var(--warning-soft)] px-3 py-2 text-xs font-medium text-[color:var(--warning-ink)]">
+          {error}
         </p>
       )}
 
@@ -101,7 +98,6 @@ export default function ShortagesPage() {
 
       {products.length === 0 ? (
         <EmptyState
-          icon="✅"
           title="کسرای ثبت نشده"
           desc="در صفحه کالاها روی «کسری دارم؟» کالاها بزنید تا اینجا فهرست شوند"
         />
@@ -110,13 +106,13 @@ export default function ShortagesPage() {
           <label className="flex cursor-pointer items-center gap-2 rounded-xl bg-[color:var(--line)] px-3 py-2 text-xs font-medium text-[color:var(--ink-soft)]">
             <input
               type="checkbox"
-              className="size-4 accent-[#12AC93]"
+              className="size-4 accent-[var(--primary)]"
               checked={allSelected}
               onChange={toggleAll}
             />
             انتخاب همه ({faNum(products.length)} کالا)
             {selected.size > 0 && !allSelected && (
-              <span className="text-[color:#0A7C6B]">({faNum(selected.size)} انتخاب شده)</span>
+              <span className="text-[color:var(--primary-dark)]">({faNum(selected.size)} انتخاب شده)</span>
             )}
           </label>
 
@@ -125,7 +121,7 @@ export default function ShortagesPage() {
               <div key={p.id} className="card flex items-center gap-3 p-3.5">
                 <input
                   type="checkbox"
-                  className="size-4 shrink-0 accent-[#12AC93]"
+                  className="size-4 shrink-0 accent-[var(--primary)]"
                   checked={selected.has(p.id)}
                   onChange={() => toggleSelect(p.id)}
                 />
@@ -152,14 +148,14 @@ export default function ShortagesPage() {
                   className="shrink-0 px-2.5 py-1.5 text-[11px]"
                   onClick={() => clearShort(p)}
                 >
-                  ✅ رفع کسری
+                  رفع کسری
                 </Button>
               </div>
             ))}
           </div>
 
-          <div className="rounded-2xl border border-[color:var(--teal-1)] bg-[color:var(--mint-soft)] p-3 text-[11px] leading-5 text-[color:#0A7C6B]">
-            💡 با «ساخت درخواست قیمت»، کالاهای انتخاب‌شده (یا همه لیست) مستقیماً به
+          <div className="rounded-2xl border border-[color:var(--primary)] bg-[color:var(--primary-soft)] p-3 text-[11px] leading-5 text-[color:var(--primary-dark)]">
+            با «ساخت درخواست قیمت»، کالاهای انتخاب‌شده (یا همه لیست) مستقیماً به
             فرم درخواست قیمت می‌روند؛ بعد از ثبت سفارش برای هر کالا، کسری آن به‌صورت
             خودکار رفع می‌شود.
           </div>
