@@ -34,14 +34,24 @@ export function RegisterForm() {
     setError(res?.error ?? "خطا در ثبتنام");
   }
 
+  const errField = !error
+    ? null
+    : error.includes("ایمیل")
+      ? "email"
+      : error.includes("رمز")
+        ? "password"
+        : error.includes("داروخانه")
+          ? "name"
+          : "form";
+
   return (
     <AuthShell>
-      <h2 className="mb-1 text-base font-bold text-slate-900">ساخت حساب داروخانه</h2>
-      <p className="mb-4 text-xs text-slate-500">
+      <h2 className="mb-1 text-base font-bold text-[color:var(--ink)]">ساخت حساب داروخانه</h2>
+      <p className="mb-4 text-xs text-[color:var(--ink-soft)]">
         ثبتنام رایگان — {faNum(TRIAL_DAYS)} روز استفاده آزمایشی کامل
       </p>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="نام داروخانه">
+        <Field label="نام داروخانه" error={errField === "name" ? error : null}>
           <Input
             placeholder="مثلاً: داروخانه دکتر سلامت"
             value={pharmacyName}
@@ -58,7 +68,7 @@ export function RegisterForm() {
             onChange={(e) => setPhone(e.target.value)}
           />
         </Field>
-        <Field label="ایمیل">
+        <Field label="ایمیل" error={errField === "email" ? error : null}>
           <Input
             type="email"
             dir="ltr"
@@ -68,7 +78,7 @@ export function RegisterForm() {
             required
           />
         </Field>
-        <Field label="رمز عبور (حداقل ۸ کاراکتر)">
+        <Field label="رمز عبور (حداقل ۸ کاراکتر)" error={errField === "password" ? error : null}>
           <Input
             type="password"
             dir="ltr"
@@ -78,16 +88,12 @@ export function RegisterForm() {
             required
           />
         </Field>
-        {error && (
-          <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-medium text-rose-600">
-            {error}
-          </p>
-        )}
-        <Button type="submit" variant="accent" disabled={busy} className="w-full">
+        {errField === "form" && <p className="field-error">{error}</p>}
+        <Button type="submit" variant="primary" disabled={busy} className="w-full">
           {busy ? "در حال ساخت حساب…" : "شروع دوره آزمایشی"}
         </Button>
-        <p className="mt-2 text-center text-[10px] leading-4 text-slate-400">
-          با ثبت‌نام، <Link href="/privacy" className="text-teal-600 underline">قوانین و حریم خصوصی</Link> را می‌پذیرید
+        <p className="mt-2 text-center text-[10px] leading-4 text-[color:var(--ink-soft)]">
+          با ثبت‌نام، <Link href="/privacy" className="text-[color:var(--primary-dark)] underline">قوانین و حریم خصوصی</Link> را می‌پذیرید
         </p>
       </form>
 
@@ -98,9 +104,9 @@ export function RegisterForm() {
         <RegisterInstall trigger={false} />
       </div>
 
-      <p className="mt-4 text-center text-xs text-slate-500">
+      <p className="mt-4 text-center text-xs text-[color:var(--ink-soft)]">
         قبلاً ثبتنام کرده‌اید؟{" "}
-        <Link href="/login" className="font-bold text-teal-600">
+        <Link href="/login" className="font-bold text-[color:var(--primary-dark)]">
           ورود
         </Link>
       </p>
