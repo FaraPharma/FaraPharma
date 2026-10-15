@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useOfflineData } from "@/hooks/useOfflineData";
 import { SubscriptionBanner } from "@/components/sub-banner";
 import { TRIAL_DAYS } from "@/lib/config";
 import { OfflineBadge } from "@/components/offline-badge";
+import { JalaliDatePicker } from "@/lib/jalali";
 import {
   PageHeader,
   Button,
@@ -17,21 +18,26 @@ import {
   Textarea,
   Spinner,
   EmptyState,
+  AddButton,
 } from "@/components/ui";
 import {
   createOrderAction,
   setOrderStatusAction,
   deleteOrderAction,
+  restoreOrderAction,
+  purgeOrderAction,
 } from "@/actions/orders";
 import { addChequeAction } from "@/actions/cheques";
 import { exportOrderPdf, exportOrderExcel, copyText, orderPlainText } from "@/lib/export";
 import { orderTotal } from "@/lib/domain";
+import { newClientKey } from "@/lib/client-key";
 import { faDate, faDateTime, faNum, toNum, toman } from "@/lib/format";
 import { ORDER_STATUS, type OrderStatusKey } from "@/lib/config";
 import type { Order, OrderItem, Visitor, Product } from "@/lib/types";
 
 interface OrdersData {
   orders: Order[];
+  trash: Order[];
   items: OrderItem[];
   visitors: Visitor[];
   products: Product[];
@@ -74,12 +80,20 @@ export default function OrdersPage() {
     { key: 1, productName: "", qty: "1", unitPrice: "", discountPct: "0" },
   ]);
   const [busy, setBusy] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
+  // کلید ثبت هنگام باز شدن فرم ساخته می‌شود و تا بستن آن (حتی با تلاش دوباره) ثابت می‌ماند
+  const clientKeyRef = useRef("");
+  const submitRef = useRef(false);
   const [detail, setDetail] = useState<Order | null>(null);
   const [qnText, setQnText] = useState("");
   // چک اختیاری هنگام ثبت سفارش (کاملاً دستی)
   const [chequeOpen, setChequeOpen] = useState(false);
   const [chequeAmount, setChequeAmount] = useState("");
   const [chequeDue, setChequeDue] = useState("");
+
+  useEffect(() => {
+    if (newOpen) clientKeyRef.current = newClientKey();
+  }, [newOpen]);
 
   // تبدیل یادداشت سریع به سفارش (از صفحه یادداشتها با #note=)
   useEffect(() => {
@@ -107,6 +121,14 @@ export default function OrdersPage() {
   const ordersWithItems = useMemo(() => {
     if (!data) return [];
     return data.orders.map((o) => ({
+      ...o,
+      items: data.items.filter((it) => it.orderId === o.id),
+    }));
+  }, [data]);
+
+  const trashWithItems = useMemo(() => {
+    if (!data) return [];
+    return (data.trash ?? []).map((o) => ({
       ...o,
       items: data.items.filter((it) => it.orderId === o.id),
     }));
@@ -147,20 +169,29 @@ export default function OrdersPage() {
       toast.error("حداقل یک قلم کالا وارد کنید");
       return;
     }
+    // بعد از اولین لمس تا پایان درخواست، ثبت دوباره ممکن نیست
+    if (submitRef.current) return;
+    submitRef.current = true;
     setBusy(true);
-    const res = await createOrderAction({
-      visitorId,
-      note: note || undefined,
-      settlementType,
-      settlementDays: toNum(settlementDays) || 0,
-      items: valid.map((it) => ({
-        productName: it.productName,
-        qty: toNum(it.qty) || 1,
-        unitPrice: toNum(it.unitPrice) || 0,
-        discountPct: toNum(it.discountPct) || 0,
-      })),
-    });
-    setBusy(false);
+    let res: Awaited<ReturnType<typeof createOrderAction>>;
+    try {
+      res = await createOrderAction({
+        clientKey: clientKeyRef.current || undefined,
+        visitorId,
+        note: note || undefined,
+        settlementType,
+        settlementDays: toNum(settlementDays) || 0,
+        items: valid.map((it) => ({
+          productName: it.productName,
+          qty: toNum(it.qty) || 1,
+          unitPrice: toNum(it.unitPrice) || 0,
+          discountPct: toNum(it.discountPct) || 0,
+        })),
+      });
+    } finally {
+      submitRef.current = false;
+      setBusy(false);
+    }
     if (res.ok) {
       // ثبت چک دستی همراه سفارش (در صورت پر شدن فیلدها)
       if (res.id && toNum(chequeAmount) > 0 && chequeDue) {
@@ -193,11 +224,28 @@ export default function OrdersPage() {
   }
 
   async function remove(o: Order) {
-    if (!confirm("این سفارش حذف شود؟")) return;
+    if (!confirm("این سفارش به سطل بازیافت منتقل شود؟ بعداً می‌توانید آن را بازگردانی کنید.")) return;
     const res = await deleteOrderAction(o.id);
     if (res.ok) {
-      toast.success("حذف شد");
+      toast.success("به سطل بازیافت منتقل شد");
       setDetail(null);
+      load();
+    } else toast.error(res.error ?? "خطا");
+  }
+
+  async function restore(o: Order) {
+    const res = await restoreOrderAction(o.id);
+    if (res.ok) {
+      toast.success("سفارش بازگردانی شد");
+      load();
+    } else toast.error(res.error ?? "خطا");
+  }
+
+  async function purge(o: Order) {
+    if (!confirm("این سفارش برای همیشه حذف شود؟ این کار قابل بازگشت نیست.")) return;
+    const res = await purgeOrderAction(o.id);
+    if (res.ok) {
+      toast.success("برای همیشه حذف شد");
       load();
     } else toast.error(res.error ?? "خطا");
   }
@@ -270,24 +318,22 @@ export default function OrdersPage() {
         title="سفارش فوری"
         subtitle="فقط برای مواقع ضروری — وقتی ویزیتور در دسترس نیست"
         action={
-          <Button onClick={() => setNewOpen(true)} className="px-3 py-2 text-xs">
-            + سفارش جدید
-          </Button>
+          <AddButton onClick={() => setNewOpen(true)}>سفارش جدید</AddButton>
         }
       />
 
       <SubscriptionBanner profile={data?.profile ?? null} trialDays={TRIAL_DAYS} compact />
 
       {error && (
-        <p className="rounded-xl px-3 py-2 text-xs font-medium" style={{ background: "var(--amber-soft)", color: "#8A5A0E" }}>
-          ⚠️ {error}
+        <p className="rounded-xl px-3 py-2 text-xs font-medium" style={{ background: "var(--warning-soft)", color: "var(--warning-ink)" }}>
+          {error}
         </p>
       )}
 
       <OfflineBadge stale={stale} savedAt={savedAt} />
 
       {ordersWithItems.length === 0 ? (
-        <EmptyState icon="🧾" title="سفارشی ثبت نشده" desc="اولین سفارش را از دکمه «+ سفارش جدید» ثبت کنید" />
+        <EmptyState title="سفارشی ثبت نشده" desc="اولین سفارش را از دکمه «سفارش جدید» ثبت کنید" />
       ) : (
         <div className="space-y-2.5">
           {ordersWithItems.map((o) => {
@@ -308,13 +354,18 @@ export default function OrdersPage() {
                       {o.visitorCompany && <Badge color="blue">{o.visitorCompany}</Badge>}
                     </div>
                     <div className="mt-1 flex items-center gap-3 text-[11px] text-[color:var(--ink-soft)]">
+                      {o.orderNo ? (
+                        <span className="tnum font-bold text-[color:var(--primary-dark)]">
+                          سفارش {faNum(o.orderNo)}
+                        </span>
+                      ) : null}
                       <span>{faDateTime(o.createdAt)}</span>
                       <span>{faNum(o.items?.length ?? 0)} قلم</span>
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <Badge color={sb?.color ?? "slate"}>{sb?.label ?? o.status}</Badge>
-                    <span className="tnum text-sm font-bold text-[color:#0A7C6B]">{toman(total)}</span>
+                    <span className="tnum text-sm font-bold text-[color:var(--primary-dark)]">{toman(total)}</span>
                     <span
                       role="button"
                       tabIndex={0}
@@ -328,7 +379,7 @@ export default function OrdersPage() {
                           repeatOrder(o);
                         }
                       }}
-                      className="rounded-full bg-[color:var(--mint-soft)] px-2.5 py-1 text-[10px] font-bold text-[color:#0A7C6B] transition hover:bg-[color:var(--mint-soft)]"
+                      className="rounded-full bg-[color:var(--primary-soft)] px-2.5 py-1 text-[10px] font-bold text-[color:var(--primary-dark)] transition hover:bg-[color:var(--primary-soft)]"
                     >
                       ↻ تکرار سفارش
                     </span>
@@ -340,12 +391,71 @@ export default function OrdersPage() {
         </div>
       )}
 
+      {/* ---------- سطل بازیافت ---------- */}
+      <section className="space-y-2.5">
+        <button
+          onClick={() => setTrashOpen((v) => !v)}
+          aria-expanded={trashOpen}
+          className="flex min-h-11 w-full items-center justify-between rounded-2xl px-1 text-sm font-bold text-[color:var(--ink-soft)]"
+        >
+          <span>سطل بازیافت ({faNum(trashWithItems.length)})</span>
+          <svg
+            viewBox="0 0 24 24"
+            className={`size-4 transition ${trashOpen ? "rotate-90" : ""}`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M15 6l-6 6 6 6" />
+          </svg>
+        </button>
+        {trashOpen &&
+          (trashWithItems.length === 0 ? (
+            <EmptyState title="سطل بازیافت خالی است" />
+          ) : (
+            trashWithItems.map((o) => (
+              <div key={o.id} className="card space-y-3 p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-bold text-[color:var(--ink)]">
+                      {o.visitorName ?? "ویزیتور"}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 text-[11px] text-[color:var(--ink-soft)]">
+                      {o.orderNo ? <span className="tnum font-bold">سفارش {faNum(o.orderNo)}</span> : null}
+                      <span>{faNum(o.items?.length ?? 0)} قلم</span>
+                      {o.deletedAt && <span>حذف: {faDateTime(o.deletedAt)}</span>}
+                    </div>
+                  </div>
+                  <span className="tnum shrink-0 text-sm font-bold text-[color:var(--ink)]">
+                    {toman(orderTotal(o))}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="primary" className="flex-1 text-xs" onClick={() => restore(o)}>
+                    بازگردانی
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    className="flex-1 text-xs text-[color:var(--danger-ink)]"
+                    onClick={() => purge(o)}
+                  >
+                    حذف نهایی
+                  </Button>
+                </div>
+              </div>
+            ))
+          ))}
+      </section>
+
       {/* ---------- Create ---------- */}
       <Modal open={newOpen} onClose={() => setNewOpen(false)} title="سفارش جدید">
         <form onSubmit={create} className="space-y-3">
           {qnText && (
-            <div className="rounded-xl border border-[color:var(--teal-1)] bg-[color:var(--mint-soft)]/60 px-3 py-2 text-[11px] leading-5 text-[color:#0A7C6B]">
-              📝 از یادداشت: <span className="font-medium">{qnText}</span>
+            <div className="rounded-xl border border-[color:var(--primary)] bg-[color:var(--primary-soft)]/60 px-3 py-2 text-[11px] leading-5 text-[color:var(--primary-dark)]">
+              از یادداشت: <span className="font-medium">{qnText}</span>
             </div>
           )}
           <Field label="ویزیتور">
@@ -374,9 +484,8 @@ export default function OrdersPage() {
                       onChange={(e) => updateItem(it.key, { productName: e.target.value })}
                       className="flex-1 px-2.5 py-2 text-xs"
                     />
-                    <button type="button" onClick={() => removeItem(it.key)} className="text-xs text-[color:#C43F1D]">
-                      🗑
-                    </button>
+                    <button type="button" onClick={() => removeItem(it.key)} className="text-xs text-[color:var(--danger-ink)]">
+                                          </button>
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-2">
                     <Input
@@ -433,7 +542,7 @@ export default function OrdersPage() {
                   className="flex-1 py-2 text-xs font-bold transition"
                   style={
                     settlementType === "cash"
-                      ? { background: "var(--teal-1)", color: "#fff" }
+                      ? { background: "var(--primary)", color: "var(--on-primary)" }
                       : { color: "var(--ink-soft)" }
                   }
                 >
@@ -445,7 +554,7 @@ export default function OrdersPage() {
                   className="flex-1 py-2 text-xs font-bold transition"
                   style={
                     settlementType === "cheque"
-                      ? { background: "var(--teal-1)", color: "#fff" }
+                      ? { background: "var(--primary)", color: "var(--on-primary)" }
                       : { color: "var(--ink-soft)" }
                   }
                 >
@@ -470,7 +579,7 @@ export default function OrdersPage() {
               className="flex w-full items-center justify-between text-xs font-bold"
               style={{ color: "var(--ink)" }}
             >
-              💳 ثبت یک برگه‌ی چک واقعی همین حالا (اختیاری)
+              ثبت یک برگه‌ی چک واقعی همین حالا (اختیاری)
               <span style={{ color: "var(--ink-soft)" }}>{chequeOpen ? "▲" : "▼"}</span>
             </button>
             {chequeOpen && (
@@ -484,22 +593,18 @@ export default function OrdersPage() {
                   />
                 </Field>
                 <Field label="تاریخ سررسید">
-                  <Input
-                    type="date"
-                    value={chequeDue}
-                    onChange={(e) => setChequeDue(e.target.value)}
-                  />
+                  <JalaliDatePicker value={chequeDue} onChange={setChequeDue} />
                 </Field>
               </div>
             )}
           </div>
 
-          <div className="flex items-center justify-between rounded-2xl px-4 py-3" style={{ background: "var(--mint-soft)" }}>
-            <span className="text-xs font-medium" style={{ color: "#0A7C6B" }}>جمع کل سفارش</span>
-            <span className="tnum text-base font-bold" style={{ color: "#0A7C6B" }}>{toman(draftTotal)}</span>
+          <div className="flex items-center justify-between rounded-2xl px-4 py-3" style={{ background: "var(--primary-soft)" }}>
+            <span className="text-xs font-medium" style={{ color: "var(--primary-dark)" }}>جمع کل سفارش</span>
+            <span className="tnum text-base font-bold" style={{ color: "var(--primary-dark)" }}>{toman(draftTotal)}</span>
           </div>
 
-          <Button type="submit" variant="accent" disabled={busy} className="w-full">
+          <Button type="submit" variant="primary" disabled={busy} className="w-full">
             {busy ? "در حال ثبت…" : "ثبت سفارش"}
           </Button>
         </form>
@@ -509,7 +614,11 @@ export default function OrdersPage() {
       <Modal
         open={!!detail}
         onClose={() => setDetail(null)}
-        title={detail ? `سفارش — ${faDate(detail.createdAt)}` : ""}
+        title={
+          detail
+            ? `${detail.orderNo ? `سفارش شماره ${faNum(detail.orderNo)}` : "سفارش"} — ${faDate(detail.createdAt)}`
+            : ""
+        }
       >
         {detail && (
           <div className="space-y-4">
@@ -521,48 +630,38 @@ export default function OrdersPage() {
               </Badge>
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-[color:var(--line)]">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-[color:var(--line)] text-[color:var(--ink-soft)]">
-                    <th className="px-2 py-2 text-right font-medium">کالا</th>
-                    <th className="px-2 py-2 text-center font-medium">تعداد</th>
-                    <th className="px-2 py-2 text-center font-medium">واحد</th>
-                    <th className="px-2 py-2 text-center font-medium">مبلغ</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.items?.map((it, i) => (
-                    <tr key={it.id} className="border-t border-[color:var(--line)]">
-                      <td className="px-2 py-2">
-                        {faNum(i + 1)}. {it.productName}
-                        {it.discountPct > 0 && (
-                          <span className="ms-1 text-[10px] text-[color:#C43F1D]">(−{faNum(it.discountPct)}٪)</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-2 text-center tnum">{faNum(it.qty)}</td>
-                      <td className="px-2 py-2 text-center tnum">{toman(it.unitPrice)}</td>
-                      <td className="px-2 py-2 text-center tnum font-medium">
-                        {toman(Math.round(it.qty * it.unitPrice * (1 - it.discountPct / 100)))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t-2 border-[color:var(--teal-1)] bg-[color:var(--mint-soft)]/60 font-bold">
-                    <td colSpan={3} className="px-2 py-2.5 text-left text-[color:#0A7C6B]">
-                      جمع کل
-                    </td>
-                    <td className="px-2 py-2.5 text-center tnum text-[color:#0A7C6B]">
-                      {toman(orderTotal(detail))}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+            <div className="space-y-2">
+              {detail.items?.map((it, i) => (
+                <div
+                  key={it.id}
+                  className="rounded-2xl border border-[color:var(--line)] p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 text-sm font-medium text-[color:var(--ink)]">
+                      {faNum(i + 1)}. {it.productName}
+                      {it.discountPct > 0 && (
+                        <span className="ms-1 text-[11px] text-[color:var(--danger-ink)]">
+                          (−{faNum(it.discountPct)}٪)
+                        </span>
+                      )}
+                    </div>
+                    <div className="tnum shrink-0 text-sm font-bold text-[color:var(--ink)]">
+                      {toman(Math.round(it.qty * it.unitPrice * (1 - it.discountPct / 100)))}
+                    </div>
+                  </div>
+                  <div className="tnum mt-1 text-[11px] text-[color:var(--ink-soft)]">
+                    {faNum(it.qty)} عدد × {toman(it.unitPrice)}
+                  </div>
+                </div>
+              ))}
+              <div className="flex items-center justify-between rounded-2xl bg-[color:var(--primary-soft)] px-4 py-3 font-bold text-[color:var(--primary-dark)]">
+                <span>جمع کل</span>
+                <span className="tnum">{toman(orderTotal(detail))}</span>
+              </div>
             </div>
 
             {detail.note && (
-              <p className="rounded-xl bg-[color:var(--line)] px-3 py-2 text-xs text-[color:var(--ink-soft)]">📝 {detail.note}</p>
+              <p className="rounded-xl bg-[color:var(--line)] px-3 py-2 text-xs text-[color:var(--ink-soft)]">{detail.note}</p>
             )}
 
             <div>
@@ -585,23 +684,23 @@ export default function OrdersPage() {
               <p className="mb-2 text-[11px] font-medium text-[color:var(--ink-soft)]">ارسال سفارش:</p>
               <div className="grid grid-cols-2 gap-2">
                 <Button variant="secondary" className="text-xs" onClick={() => doCopy(detail)}>
-                  📋 کپی متن کامل
+                  کپی متن کامل
                 </Button>
                 <Button variant="secondary" className="text-xs" onClick={() => doPdf(detail)}>
-                  🖨 ساخت PDF
+                  ساخت PDF
                 </Button>
                 <Button variant="secondary" className="text-xs" onClick={() => doShare(detail)}>
-                  📤 اشتراک‌گذاری مستقیم
+                  اشتراک‌گذاری مستقیم
                 </Button>
                 <Button variant="secondary" className="text-xs" onClick={() => doExcel(detail)}>
-                  📊 خروجی Excel
+                  خروجی Excel
                 </Button>
               </div>
             </div>
 
             <div className="border-t border-[color:var(--line)] pt-3">
-              <Button variant="ghost" className="text-xs text-[color:#C43F1D]" onClick={() => remove(detail)}>
-                🗑 حذف سفارش
+              <Button variant="ghost" className="text-xs text-[color:var(--danger-ink)]" onClick={() => remove(detail)}>
+                حذف سفارش
               </Button>
             </div>
           </div>
