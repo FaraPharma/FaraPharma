@@ -10,6 +10,7 @@ import {
   visitorProducts,
   visitorProductHistory,
   products,
+  orders,
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth";
 import type { ActionResult } from "@/actions/auth";
@@ -124,6 +125,18 @@ export async function deleteVisitorAction(id: string): Promise<ActionResult> {
   try {
     await withTenant(ctx, async (tx) => {
       await assertWritable(ctx, tx);
+      // سفارش‌ها (حتی داخل سطل بازیافت) با حذف ویزیتور برای همیشه پاک می‌شدند
+      const hasOrders = await tx
+        .select({ id: orders.id })
+        .from(orders)
+        .where(and(eq(orders.visitorId, id), eq(orders.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (hasOrders.length > 0) {
+        throw new AppError(
+          "این ویزیتور سفارش ثبت‌شده دارد و حذف نمی‌شود. اگر واقعاً لازم است، ابتدا سفارش‌های او را (از جمله سطل بازیافت) حذف نهایی کنید.",
+          409
+        );
+      }
       await tx
         .delete(visitors)
         .where(and(eq(visitors.id, id), eq(visitors.tenantId, ctx.tenantId)));
