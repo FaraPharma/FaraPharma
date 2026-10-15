@@ -123,6 +123,8 @@ export interface OrderItem {
 
 export interface Order {
   id: string;
+  orderNo: number;
+  deletedAt?: string | null;
   visitorId: string;
   visitorName?: string;
   visitorCompany?: string | null;
