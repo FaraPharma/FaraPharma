@@ -109,7 +109,11 @@ export function buildRequestText(
 
 export function buildOrderText(order: Order, pharmacyName?: string): string {
   const lines: string[] = [];
-  lines.push("📋 سفارش جدید");
+  lines.push(
+    order.orderNo
+      ? `سفارش شماره ${order.orderNo.toLocaleString("fa-IR", { useGrouping: false })}`
+      : "سفارش جدید"
+  );
   lines.push("——————————");
   if (pharmacyName) lines.push(`داروخانه: ${pharmacyName}`);
   lines.push(`ویزیتور: ${order.visitorName ?? "—"}${order.visitorCompany ? ` — ${order.visitorCompany}` : ""}`);

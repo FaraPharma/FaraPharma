@@ -51,7 +51,7 @@ function pdfInnerHtml(order: Order, pharmacyName?: string): string {
         </div>
         <div style="text-align:left;font-size:12px;color:var(--ink-soft);">
           <div>تاریخ: ${date}</div>
-          <div>شماره: ${order.id.slice(0, 8)}</div>
+          <div>شماره سفارش: ${order.orderNo ? order.orderNo.toLocaleString("fa-IR", { useGrouping: false }) : order.id.slice(0, 8)}</div>
         </div>
       </div>
       <div style="display:flex;gap:24px;margin:14px 0;font-size:14px;">
@@ -116,7 +116,7 @@ export async function exportOrderPdf(order: Order, pharmacyName?: string): Promi
       pdf.addPage();
       pdf.addImage(img, "JPEG", 0, position, 210, imgHeight);
     }
-    pdf.save(`safaresh-${order.id.slice(0, 8)}.pdf`);
+    pdf.save(`safaresh-${order.orderNo ?? order.id.slice(0, 8)}.pdf`);
   } finally {
     el.remove();
   }
@@ -128,6 +128,7 @@ export async function exportOrderExcel(order: Order): Promise<void> {
   const total = orderTotal(order);
   const aoa: Array<Array<string | number>> = [
     ["فرم سفارش خرید"],
+    ["شماره سفارش", order.orderNo ?? order.id.slice(0, 8)],
     ["ویزیتور", order.visitorName ?? "—"],
     ["شرکت", order.visitorCompany ?? "—"],
     ["تاریخ", new Date(order.createdAt).toLocaleString("fa-IR")],
@@ -148,7 +149,7 @@ export async function exportOrderExcel(order: Order): Promise<void> {
   ws["!cols"] = [{ wch: 8 }, { wch: 34 }, { wch: 8 }, { wch: 18 }, { wch: 10 }, { wch: 16 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "سفارش");
-  XLSX.writeFile(wb, `safaresh-${order.id.slice(0, 8)}.xlsx`);
+  XLSX.writeFile(wb, `safaresh-${order.orderNo ?? order.id.slice(0, 8)}.xlsx`);
 }
 
 export function orderPlainText(order: Order, pharmacyName?: string): string {
