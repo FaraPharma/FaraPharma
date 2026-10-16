@@ -339,12 +339,13 @@ BEGIN
     UPDATE profiles SET name = owner_name
       WHERE (name IS NULL OR name = '') AND owner_name IS NOT NULL AND owner_name <> '';
   END IF;
-  -- backfill status از subscription_status سفارشی
+  -- backfill status از subscription_status سفارشی (فقط وقتی status خالی است؛
+  -- هرگز مقدار تنظیم‌شده‌ی status را بازنویسی نمی‌کند)
   IF EXISTS (SELECT 1 FROM information_schema.columns
              WHERE table_schema='public' AND table_name='profiles' AND column_name='subscription_status') THEN
     UPDATE profiles SET status = subscription_status
       WHERE subscription_status IN ('trial','active','expired')
-        AND status IS DISTINCT FROM subscription_status;
+        AND (status IS NULL OR status = '');
   END IF;
   -- backfill trial_ends_at برای وضعیت آزمایشی
   IF EXISTS (SELECT 1 FROM information_schema.columns
