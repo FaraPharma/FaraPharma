@@ -83,7 +83,7 @@ export function getPool(): Pool {
   }
 
   let p = perRequest.get(ctx);
-  if (!p) {
+  if (!p || (p as unknown as { ended?: boolean }).ended) {
     p = createPool();
     perRequest.set(ctx, p);
     closeWhenIdle(p, ctx);
