@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, and, desc, isNotNull, sql } from "drizzle-orm";
+import { eq, and, desc, isNotNull, isNull, sql } from "drizzle-orm";
 import { AppError, withTenant } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import {
@@ -49,7 +49,11 @@ export async function GET() {
           .select({ id: orders.id })
           .from(orders)
           .where(
-            and(eq(orders.tenantId, ctx.tenantId), eq(orders.status, "registered"))
+            and(
+              eq(orders.tenantId, ctx.tenantId),
+              eq(orders.status, "registered"),
+              isNull(orders.deletedAt)
+            )
           ),
         tx
           .select({ id: priceRequests.id })
@@ -83,7 +87,7 @@ export async function GET() {
         })
         .from(orders)
         .leftJoin(visitors, eq(orders.visitorId, visitors.id))
-        .where(eq(orders.tenantId, ctx.tenantId))
+        .where(and(eq(orders.tenantId, ctx.tenantId), isNull(orders.deletedAt)))
         .orderBy(desc(orders.createdAt))
         .limit(5);
 
