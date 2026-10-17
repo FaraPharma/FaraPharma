@@ -1,9 +1,9 @@
 /**
- * Ops script: runs the idempotent bootstrap (tables, indexes, RLS policies,
+ * Ops script: runs the pending database migrations (tables, indexes, RLS policies,
  * admin seed, base-products seed) on the configured DATABASE_URL.
  * Usage: DATABASE_URL=... npx -y tsx scripts/apply-bootstrap.ts
  */
-import { ensureDb } from "../src/db/bootstrap";
+import { runMigrations } from "../src/db/migrations";
 import { pool } from "../src/db/pool";
 
 /**
@@ -76,7 +76,8 @@ async function verifyCriticalColumns() {
 }
 
 async function main() {
-  await ensureDb();
+  const report = await runMigrations();
+  console.log("MIGRATIONS:", JSON.stringify(report, null, 2));
   await verifyCriticalColumns();
   const tables = await pool.query(
     `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
