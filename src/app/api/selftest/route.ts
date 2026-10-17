@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { Client, Pool, type PoolClient } from "pg";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { requireAdmin, signSession } from "@/lib/auth";
 import { AUTH_COOKIE } from "@/lib/config";
 import { ensureDb } from "@/db/bootstrap";
+import { diffSchema } from "@/db/schema-check";
+import { listPendingMigrations, runMigrations } from "@/db/migrations";
+import { registerAction } from "@/actions/auth";
 import { effectiveStatus } from "@/lib/format";
 import { addVisitorAction, deleteVisitorAction } from "@/actions/visitors";
 import {
@@ -31,6 +35,8 @@ import { GET as visitorsGET } from "@/app/api/visitors/route";
  * آزمون‌های ۱ و ۲ (همزمانی) همان دنباله‌ی SQL ثبت سفارش را با اتصال‌های جدا اجرا می‌کنند؛
  * آزمون‌های ۳ تا ۷ اکشن‌ها و مسیرهای واقعی (فهرست، داشبورد، پشتیبان) را صدا می‌زنند؛
  * آزمون ۸ مسیر واقعی را با نشست داروخانه‌ی B (از طریق WORKER_SELF_REFERENCE) صدا می‌زند.
+ * آزمون‌های ۱۰ تا ۱۲: مقایسه‌ی اسکیمای واقعی با schema.ts، ثبت‌نام آزمایشی با اکشن واقعی
+ *   (کوکی نشست مدیر برگردانده می‌شود) و اجرای دوباره‌ی مهاجرت‌ها با اتصال ممتاز (اشتراک مدیر ثابت بماند).
  * آزمون ۹: وضعیت اشتراک پروفایل مدیر موقتاً «آزمایشی-منقضی» می‌شود (commit می‌شود تا اکشن‌های
  *   واقعی ببینند) و در finally حتماً به مقدار اصلی برمی‌گردد؛ مقدار قبلی در پاک‌سازی هم بررسی می‌شود.
  */
@@ -445,6 +451,87 @@ export async function GET(request: NextRequest) {
           await restoreProfile();
         }
       });
+
+      // ---------- ۱۰) اسکیمای واقعی دیتابیس با schema.ts ----------
+      await test("۱۰) اسکیمای واقعی با schema.ts هماهنگ است", async () => {
+        const d = await diffSchema(pool);
+        const pass =
+          d.missingTables.length === 0 &&
+          d.missingColumns.length === 0 &&
+          d.nullabilityMismatch.length === 0 &&
+          d.legacyRequired.length === 0;
+        const fmt = (a: { table: string; column: string }[]) => a.map((x) => `${x.table}.${x.column}`).join("، ");
+        return {
+          pass,
+          detail: pass
+            ? `${d.tablesChecked} جدول و ${d.columnsChecked} ستون هماهنگ‌اند${d.skippedViews.length ? ` (view: ${d.skippedViews.join("،")})` : ""}`
+            : `ناموفق — ستون گم‌شده: [${fmt(d.missingColumns)}] | اجباریِ بدون پیش‌فرض که کد پر نمی‌کند: [${fmt(d.legacyRequired)}] | کد خالی‌پذیر ولی دیتابیس NOT NULL: [${fmt(d.nullabilityMismatch)}] | جدول گم‌شده: [${d.missingTables.join("،")}] — ابتدا /api/admin/migrate?confirm=yes را اجرا کنید`,
+        };
+      });
+
+      // ---------- ۱۱) ثبت‌نام آزمایشی کاربر جدید با اکشن واقعی ----------
+      await test("۱۱) ثبت‌نام آزمایشی کاربر جدید (اکشن واقعی)", async () => {
+        const email = `selftest-reg-${crypto.randomUUID()}@invalid.test`;
+        const adminTok = request.cookies.get(AUTH_COOKIE)?.value;
+        const adminTid = request.cookies.get("pharma_tid")?.value;
+        let res: Awaited<ReturnType<typeof registerAction>>;
+        try {
+          res = await registerAction({
+            pharmacyName: `SELFTEST-reg-${stamp}`,
+            phone: "09120000000",
+            email,
+            password: `Selftest-${crypto.randomUUID().slice(0, 12)}`,
+          });
+        } finally {
+          // ثبت‌نام واقعی کوکی نشست کاربر جدید را می‌گذارد؛ نشست مدیر برگردانده می‌شود
+          const store = await cookies();
+          const opts = { sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30 };
+          if (adminTok) store.set(AUTH_COOKIE, adminTok, { ...opts, httpOnly: true });
+          if (adminTid) store.set("pharma_tid", adminTid, { ...opts, httpOnly: false });
+        }
+        const row = await dbOne(
+          `SELECT (SELECT count(*)::int FROM users WHERE email = $1) AS u,
+                  (SELECT count(*)::int FROM profiles p JOIN users x ON x.id = p.owner_user_id WHERE x.email = $1) AS p`,
+          [email]
+        );
+        const c = {
+          actionOk: res.ok === true,
+          userCreated: row?.u === 1,
+          profileCreated: row?.p === 1,
+          adminSessionKept: !adminTok || (await cookies()).get(AUTH_COOKIE)?.value === adminTok,
+        };
+        const pass = Object.values(c).every(Boolean);
+        return {
+          pass,
+          detail: pass
+            ? "کاربر و داروخانه‌ی آزمایشی با اکشن واقعی ساخته شد (در پاک‌سازی حذف می‌شود) و نشست مدیر برگشت"
+            : `ناموفق: ${JSON.stringify(c)}${res.ok ? "" : ` خطای ثبت‌نام=${res.error}`}`,
+        };
+      });
+
+      // ---------- ۱۲) اجرای مهاجرت‌ها؛ اشتراک مدیر تغییر نکند ----------
+      await test("۱۲) مهاجرت‌ها اجرا شدند و وضعیت/تاریخ اشتراک مدیر تغییر نکرد", async () => {
+        const snap = () => dbOne("SELECT status, trial_ends_at, subscription_ends_at FROM profiles WHERE id = $1", [A]);
+        const t = (d: Date | null | undefined) => (d ? new Date(d).getTime() : null);
+        const before = await snap();
+        const pendingBefore = await listPendingMigrations(pool);
+        const report = await runMigrations({ force: true }); // همه‌ی مهاجرت‌ها (تکرارپذیرند) دوباره اجرا می‌شوند
+        const after = await snap();
+        const c = {
+          nonePendingBefore: pendingBefore.length === 0,
+          migrationsOk: report.ok === true,
+          statusSame: before?.status === after?.status,
+          trialEndSame: t(before?.trial_ends_at) === t(after?.trial_ends_at),
+          subEndSame: t(before?.subscription_ends_at) === t(after?.subscription_ends_at),
+        };
+        const pass = Object.values(c).every(Boolean);
+        return {
+          pass,
+          detail: pass
+            ? `${report.applied.length} مهاجرت دوباره اجرا شد؛ اشتراک مدیر (${before?.status}) بدون تغییر ماند`
+            : `ناموفق: ${JSON.stringify(c)} قبل=${before?.status} بعد=${after?.status} معوق=[${pendingBefore.join("،")}]${report.failed ? ` شکست=${report.failed.name}: ${report.failed.error}` : ""}${report.error ? ` خطا=${report.error}` : ""}`,
+        };
+      });
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -496,7 +583,7 @@ export async function GET(request: NextRequest) {
   const passed = results.filter((r) => r.pass).length;
   const failed = results.length - passed;
   return NextResponse.json({
-    ok: !setupError && failed === 0 && results.length >= 10,
+    ok: !setupError && failed === 0 && results.length >= 13,
     passed,
     failed,
     ...(setupError ? { setupError } : {}),
