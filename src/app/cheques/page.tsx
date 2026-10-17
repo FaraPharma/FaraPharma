@@ -49,6 +49,7 @@ interface ChequesData {
     subscriptionEndsAt: string | null;
     createdAt: string;
   } | null;
+  role?: string;
 }
 
 const WEEKDAYS = [
@@ -361,7 +362,7 @@ export default function ChequesPage() {
         }
       />
 
-      <SubscriptionBanner profile={data?.profile ?? null} trialDays={TRIAL_DAYS} compact />
+      <SubscriptionBanner profile={data?.profile ?? null} trialDays={TRIAL_DAYS} compact role={data?.role} />
 
       {error && (
         <p className="rounded-xl bg-[color:var(--warning-soft)] px-3 py-2 text-xs font-medium text-[color:var(--warning-ink)]">
