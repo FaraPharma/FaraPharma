@@ -51,6 +51,7 @@ interface OrdersData {
     subscriptionEndsAt: string | null;
     createdAt: string;
   } | null;
+  role?: string;
 }
 
 const STATUS_BADGE: Record<string, { color: "blue" | "green" | "red"; label: string }> = {
@@ -322,7 +323,7 @@ export default function OrdersPage() {
         }
       />
 
-      <SubscriptionBanner profile={data?.profile ?? null} trialDays={TRIAL_DAYS} compact />
+      <SubscriptionBanner profile={data?.profile ?? null} trialDays={TRIAL_DAYS} compact role={data?.role} />
 
       {error && (
         <p className="rounded-xl px-3 py-2 text-xs font-medium" style={{ background: "var(--warning-soft)", color: "var(--warning-ink)" }}>
