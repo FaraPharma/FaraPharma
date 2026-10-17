@@ -339,14 +339,8 @@ BEGIN
     UPDATE profiles SET name = owner_name
       WHERE (name IS NULL OR name = '') AND owner_name IS NOT NULL AND owner_name <> '';
   END IF;
-  -- backfill status از subscription_status سفارشی (فقط وقتی status خالی است؛
-  -- هرگز مقدار تنظیم‌شده‌ی status را بازنویسی نمی‌کند)
-  IF EXISTS (SELECT 1 FROM information_schema.columns
-             WHERE table_schema='public' AND table_name='profiles' AND column_name='subscription_status') THEN
-    UPDATE profiles SET status = subscription_status
-      WHERE subscription_status IN ('trial','active','expired')
-        AND (status IS NULL OR status = '');
-  END IF;
+  -- (حذف شد) بازنویسی status از ستون قدیمی subscription_status؛ آن مرحله هر بار
+  -- که بوت‌استرپ اجرا می‌شد وضعیت اشتراکِ تنظیم‌شده‌ی دستی (مثلاً مدیر) را برمی‌گرداند.
   -- backfill trial_ends_at برای وضعیت آزمایشی
   IF EXISTS (SELECT 1 FROM information_schema.columns
              WHERE table_schema='public' AND table_name='profiles' AND column_name='subscription_ends_at')
