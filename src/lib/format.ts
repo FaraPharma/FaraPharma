@@ -79,7 +79,11 @@ export interface SubProfile {
 }
 
 /** Effective subscription status, derived from dates too. */
-export function effectiveStatus(p: SubProfile): "trial" | "active" | "expired" {
+export function effectiveStatus(
+  p: SubProfile,
+  role?: string
+): "trial" | "active" | "expired" {
+  if (role === "admin") return "active"; // مدیر از محدودیت اشتراک معاف است
   const now = Date.now();
   if (p.status === "active") {
     return p.subscriptionEndsAt &&
