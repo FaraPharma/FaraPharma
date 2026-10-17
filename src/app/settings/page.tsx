@@ -111,7 +111,7 @@ export default function SettingsPage() {
     <div className="space-y-4">
       <PageHeader title="حساب کاربری" subtitle="پروفایل داروخانه و وضعیت اشتراک" />
 
-      <SubscriptionBanner profile={data?.profile ?? null} trialDays={data?.trialDays ?? TRIAL_DAYS} />
+      <SubscriptionBanner profile={data?.profile ?? null} trialDays={data?.trialDays ?? TRIAL_DAYS} role={data?.role} />
 
       <form onSubmit={save} className="card space-y-3 p-4">
         <h2 className="text-sm font-bold text-[color:var(--ink)]">اطلاعات داروخانه</h2>
