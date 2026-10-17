@@ -47,6 +47,7 @@ export async function GET() {
         cheques: active,
         history,
         warningDays: prof?.warningDays ?? 7,
+        role: ctx.role,
         profile: prof
           ? {
               id: prof.id,
