@@ -96,6 +96,7 @@ export async function GET() {
         products: productRows,
         pharmacyName: profileRow[0]?.name ?? null,
         profile: profileRow[0] ?? null,
+        role: ctx.role,
       };
     });
     return NextResponse.json(data);
