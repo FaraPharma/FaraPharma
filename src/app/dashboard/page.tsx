@@ -245,7 +245,7 @@ export default function DashboardPage() {
   const lowStock = data.lowStockCount ?? 0;
   const offers = data.expiringOffers ?? [];
   const notesCount = data.quickNotes?.length ?? 0;
-  const subStatus = data.profile ? effectiveStatus(data.profile) : "active";
+  const subStatus = data.profile ? effectiveStatus(data.profile, data.role) : "active";
   const trialLeft = data.profile ? daysLeft(data.profile.trialEndsAt) : null;
 
   const hasAlerts =
