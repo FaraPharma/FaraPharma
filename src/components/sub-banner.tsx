@@ -9,13 +9,29 @@ export function SubscriptionBanner({
   profile,
   trialDays,
   compact = false,
+  role,
 }: {
   profile: ProfileInfo | null;
   trialDays: number;
   compact?: boolean;
+  role?: string;
 }) {
   if (!profile) return null;
-  const status = effectiveStatus(profile);
+
+  // مدیر هیچ‌وقت «آزمایشی» یا «منقضی» نمی‌بیند
+  if (role === "admin") {
+    return (
+      <div
+        className="rounded-2xl px-4 py-3"
+        style={{ background: "var(--success-soft)", color: "var(--success-ink)" }}
+      >
+        <div className="text-sm font-bold">حساب مدیر</div>
+        <div className="text-[11px]">بدون محدودیت اشتراک</div>
+      </div>
+    );
+  }
+
+  const status = effectiveStatus(profile, role);
 
   if (status === "active") {
     const left = daysLeft(profile.subscriptionEndsAt);
