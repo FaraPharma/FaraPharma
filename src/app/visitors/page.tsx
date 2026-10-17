@@ -57,6 +57,7 @@ interface VisitorsData {
     subscriptionEndsAt: string | null;
     createdAt: string;
   } | null;
+  role?: string;
 }
 
 const STOCK_BADGE: Record<string, { color: "green" | "amber" | "red"; label: string }> = {
@@ -448,7 +449,7 @@ export default function VisitorsPage() {
         }
       />
 
-      <SubscriptionBanner profile={data?.profile ?? null} trialDays={TRIAL_DAYS} compact />
+      <SubscriptionBanner profile={data?.profile ?? null} trialDays={TRIAL_DAYS} compact role={data?.role} />
 
       {error && (
         <p className="rounded-xl bg-[color:var(--warning-soft)] px-3 py-2 text-xs font-medium text-[color:var(--warning-ink)]">
