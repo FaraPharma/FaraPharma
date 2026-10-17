@@ -130,6 +130,7 @@ export async function GET() {
         history: historyRows,
         catalogs: catalogRows,
         profile: profileRow[0] ?? null,
+        role: ctx.role,
       };
     });
     return NextResponse.json(data);
