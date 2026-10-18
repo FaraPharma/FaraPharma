@@ -1,10 +1,18 @@
 /* Service worker: app shell + multi-tenant-safe offline caching.
- * API GET responses are cached per-tenant (via the pharma_tid cookie) so
- * users on a shared browser never see each other's data. */
+ *
+ * نسخه از روی query همین فایل خوانده می‌شود (/sw.js?v=<buildId>) و با هر build عوض
+ * می‌شود؛ پس با هر deploy کش‌های قدیمی خودکار پاک می‌شوند.
+ *
+ * صفحه‌ها و API: network-first با timeout (فقط اگر شبکه نبود/کند بود از کش).
+ * فایل‌های نام‌دارِ نسخه‌دار (/_next/static، فونت، آیکون): cache-first.
+ * کش API و صفحه‌ها per-tenant است (کوکی pharma_tid با cookieStore خوانده می‌شود؛
+ * اگر tenant معلوم نبود، چیزی در کش ذخیره/خوانده نمی‌شود). */
 
-const VERSION = "pharma-v3";
+const SW_VERSION = new URL(self.location.href).searchParams.get("v") || "dev";
+const VERSION = `pharma-${SW_VERSION}`;
 const STATIC_CACHE = `${VERSION}-static`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
+const NETWORK_TIMEOUT_MS = 3000;
 
 const PRECACHE = [
   "/",
@@ -15,22 +23,33 @@ const PRECACHE = [
   "/fonts/Vazirmatn-Bold.woff2",
 ];
 
-function tenantOf(request) {
-  const cookie = request.headers.get("cookie") || "";
-  const m = cookie.match(/pharma_tid=([^;]*)/);
-  return m ? m[1] : "anon";
+// مسیرهایی که هرگز کش نمی‌شوند
+const NO_CACHE_API = ["/api/selftest", "/api/admin/", "/api/auth-test", "/api/sentry-test", "/api/push/"];
+
+/* کوکی pharma_tid (httpOnly نیست). هدر Cookie در service worker در دسترس نیست،
+ * پس از cookieStore می‌خوانیم؛ اگر مرورگر پشتیبانی نکند null برمی‌گردد. */
+async function tenantOf() {
+  try {
+    if (self.cookieStore && self.cookieStore.get) {
+      const c = await self.cookieStore.get("pharma_tid");
+      if (c && c.value) return c.value;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
-function cacheKey(request) {
+function keyFor(request, tid) {
   const sep = request.url.includes("?") ? "&" : "?";
-  return new Request(`${request.url}${sep}__tid=${tenantOf(request)}`);
+  return new Request(`${request.url}${sep}__tid=${encodeURIComponent(tid)}`);
 }
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(STATIC_CACHE)
-      .then((cache) => cache.addAll(PRECACHE))
+      .then((cache) => cache.addAll(PRECACHE.map((u) => new Request(u, { cache: "reload" }))))
       .then(() => self.skipWaiting())
   );
 });
@@ -40,27 +59,50 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((keys) =>
-        Promise.all(
-          keys
-            .filter((k) => !k.startsWith(VERSION))
-            .map((k) => caches.delete(k))
-        )
+        Promise.all(keys.filter((k) => !k.startsWith(`${VERSION}-`)).map((k) => caches.delete(k)))
       )
       .then(() => self.clients.claim())
   );
 });
 
-async function staleWhileRevalidate(request) {
-  const cache = await caches.open(RUNTIME_CACHE);
-  const key = cacheKey(request);
-  const cached = await cache.match(key);
-  const network = fetch(request)
-    .then((res) => {
-      if (res && res.ok) cache.put(key, res.clone());
-      return res;
-    })
-    .catch(() => cached);
-  return cached || network;
+/* network-first: اگر شبکه تا timeout جواب نداد و در کش نسخه‌ای هست، همان را بده
+ * (درخواست شبکه ادامه می‌یابد و کش را تازه می‌کند). اگر کش نبود، منتظر شبکه می‌مانیم. */
+async function networkFirst(event, cacheName, tid) {
+  const request = event.request;
+  const cache = await caches.open(cacheName);
+  const key = tid ? keyFor(request, tid) : null;
+
+  const networkPromise = fetch(request).then((res) => {
+    if (key && res && res.ok) {
+      const put = cache.put(key, res.clone()).catch(() => undefined);
+      try {
+        event.waitUntil(put); // اگر رویداد دیگر فعال نیست خطا می‌دهد؛ مهم نیست
+      } catch {
+        /* ignore */
+      }
+    }
+    return res;
+  });
+
+  if (!key) return networkPromise; // tenant نامعلوم: بدون کش
+
+  const cachedPromise = cache.match(key);
+  const timeout = new Promise((resolve) => setTimeout(() => resolve("timeout"), NETWORK_TIMEOUT_MS));
+
+  try {
+    const first = await Promise.race([networkPromise, timeout]);
+    if (first !== "timeout") return first;
+    const cached = await cachedPromise;
+    if (cached) {
+      networkPromise.catch(() => undefined); // به‌روزرسانی پس‌زمینه
+      return cached;
+    }
+    return await networkPromise;
+  } catch (err) {
+    const cached = await cachedPromise;
+    if (cached) return cached;
+    throw err;
+  }
 }
 
 async function cacheFirst(request) {
@@ -72,20 +114,14 @@ async function cacheFirst(request) {
   return network;
 }
 
-async function navigationFallback(request) {
+async function navigationHandler(event) {
+  const tid = await tenantOf();
   try {
-    const res = await fetch(request);
-    if (res.ok) {
-      const cache = await caches.open(STATIC_CACHE);
-      cache.put(request, res.clone());
-      return res;
-    }
+    return await networkFirst(event, RUNTIME_CACHE, tid);
   } catch {
-    /* offline */
+    /* آفلاین و بدون نسخه‌ی کش‌شده */
   }
   const cache = await caches.open(STATIC_CACHE);
-  const cached = await cache.match(request);
-  if (cached) return cached;
   const root = await cache.match("/");
   if (root) return root;
   return new Response("حالت آفلاین — اتصال اینترنت برقرار نیست", {
@@ -98,9 +134,13 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (url.pathname === "/sw.js" || url.pathname === "/manifest.json") return;
 
   if (url.pathname.startsWith("/api/")) {
-    event.respondWith(staleWhileRevalidate(request));
+    if (NO_CACHE_API.some((p) => url.pathname.startsWith(p))) return;
+    event.respondWith(
+      tenantOf().then((tid) => networkFirst(event, RUNTIME_CACHE, tid))
+    );
     return;
   }
   if (
@@ -111,8 +151,9 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(cacheFirst(request));
     return;
   }
-  if (request.mode === "navigate") {
-    event.respondWith(navigationFallback(request));
+  const accept = request.headers.get("accept") || "";
+  if (request.mode === "navigate" || accept.includes("text/html")) {
+    event.respondWith(navigationHandler(event));
   }
 });
 

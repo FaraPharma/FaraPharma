@@ -1,3 +1,9 @@
 # Static assets served by Cloudflare — cache immutable build output
 /_next/static/*
   Cache-Control: public,max-age=31536000,immutable
+
+# سرویس‌ورکر و manifest همیشه تازه (هر بار با سرور اعتبارسنجی شوند)
+/sw.js
+  Cache-Control: no-cache, max-age=0, must-revalidate
+/manifest.json
+  Cache-Control: no-cache, max-age=0, must-revalidate
