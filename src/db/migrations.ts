@@ -906,6 +906,29 @@ async function syncRuntimeRolePassword(c: Queryable): Promise<RuntimeRoleStatus>
   return { exists: true, passwordSet: true };
 }
 
+
+/**
+ * هر جدول واقعیِ دیگر در public که ستون tenant_id دارد (مثلاً جدول‌های قدیمی خارج از schema.ts) هم
+ * RLS فعال + FORCE می‌گیرد. سیاستی اضافه نمی‌شود، پس برای نقش runtime پیش‌فرض «هیچ ردیفی» است
+ * (و دسترسی GRANT هم ندارد). نقش ممتاز مهاجرت (BYPASSRLS) تأثیری نمی‌بیند.
+ */
+async function forceRlsRemainingTenantTables(c: Queryable): Promise<MigrationResult> {
+  const { rows } = await c.query(
+    `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+        AND EXISTS (SELECT 1 FROM information_schema.columns k
+                     WHERE k.table_schema = 'public' AND k.table_name = c.relname AND k.column_name = 'tenant_id')
+        AND NOT (c.relrowsecurity AND c.relforcerowsecurity)`
+  );
+  const names = rows.map((r) => String(r.relname));
+  for (const t of names) {
+    const q = `"${t.replace(/"/g, '""')}"`;
+    await c.query(`ALTER TABLE public.${q} ENABLE ROW LEVEL SECURITY`);
+    await c.query(`ALTER TABLE public.${q} FORCE ROW LEVEL SECURITY`);
+  }
+  return { forcedExtraTables: names.length, tables: names.join(",") };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -920,6 +943,7 @@ export const MIGRATIONS: Migration[] = [
   // مرحله‌ی ۳ب
   { name: "009_app_runtime_role_and_grants", up: appRuntimeRole },
   { name: "010_rls_force_and_auth_policies", up: rlsForcePolicies },
+  { name: "011_force_rls_remaining_tenant_tables", up: forceRlsRemainingTenantTables },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);
