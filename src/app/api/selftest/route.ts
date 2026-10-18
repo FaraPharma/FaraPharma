@@ -37,6 +37,7 @@ import { GET as visitorsGET } from "@/app/api/visitors/route";
  * آزمون ۸ مسیر واقعی را با نشست داروخانه‌ی B (از طریق WORKER_SELF_REFERENCE) صدا می‌زند.
  * آزمون‌های ۱۰ تا ۱۲: مقایسه‌ی اسکیمای واقعی با schema.ts، ثبت‌نام آزمایشی با اکشن واقعی
  *   (کوکی نشست مدیر برگردانده می‌شود) و اجرای دوباره‌ی مهاجرت‌ها با اتصال ممتاز (اشتراک مدیر ثابت بماند).
+ * آزمون‌های ۱۳ و ۱۴: هدر no-cache روی /sw.js و /manifest.json (از مسیر واقعی Workers) و وجود شناسه‌ی نسخه/منطق به‌روزرسانی در sw.js.
  * آزمون ۹: وضعیت اشتراک پروفایل مدیر موقتاً «آزمایشی-منقضی» می‌شود (commit می‌شود تا اکشن‌های
  *   واقعی ببینند) و در finally حتماً به مقدار اصلی برمی‌گردد؛ مقدار قبلی در پاک‌سازی هم بررسی می‌شود.
  */
@@ -532,6 +533,60 @@ export async function GET(request: NextRequest) {
             : `ناموفق: ${JSON.stringify(c)} قبل=${before?.status} بعد=${after?.status} معوق=[${pendingBefore.join("،")}]${report.failed ? ` شکست=${report.failed.name}: ${report.failed.error}` : ""}${report.error ? ` خطا=${report.error}` : ""}`,
         };
       });
+
+      // ---------- ۱۳) هدر no-cache روی /sw.js و /manifest.json (مسیر واقعی Workers) ----------
+      const swFetch = async (path: string): Promise<Response> => {
+        const env = (getCloudflareContext() as unknown as { env?: { WORKER_SELF_REFERENCE?: { fetch(r: Request): Promise<Response> } } }).env;
+        const selfRef = env?.WORKER_SELF_REFERENCE;
+        if (!selfRef) throw new Error("WORKER_SELF_REFERENCE در این محیط نیست");
+        return selfRef.fetch(new Request(`${origin}${path}`, { headers: { "cache-control": "no-cache" } }));
+      };
+      const swState: { text: string | null } = { text: null };
+      await test("۱۳) /sw.js و /manifest.json همیشه بدون کش (no-cache)", async () => {
+        const check = async (path: string) => {
+          const res = await swFetch(path);
+          const cc = (res.headers.get("cache-control") || "").toLowerCase();
+          if (path === "/sw.js" && res.ok) swState.text = await res.text();
+          else await res.arrayBuffer().catch(() => undefined);
+          return {
+            path,
+            status: res.status,
+            cc,
+            ok: res.status === 200 && cc.includes("no-cache") && cc.includes("max-age=0") && cc.includes("must-revalidate"),
+          };
+        };
+        const rows = [await check("/sw.js"), await check("/manifest.json")];
+        const pass = rows.every((r) => r.ok);
+        return {
+          pass,
+          detail: pass
+            ? "هر دو فایل با Cache-Control: no-cache, max-age=0, must-revalidate سرو می‌شوند"
+            : `ناموفق: ${rows.map((r) => `${r.path} → ${r.status} «${r.cc || "بدون هدر"}»`).join(" | ")}`,
+        };
+      });
+
+      // ---------- ۱۴) شناسه‌ی نسخه و منطق به‌روزرسانی در sw.js ----------
+      await test("۱۴) شناسه‌ی نسخه‌ی build و منطق سرویس‌ورکر", async () => {
+        const text = swState.text ?? "";
+        const buildId = process.env.NEXT_PUBLIC_BUILD_ID || "";
+        const c = {
+          swFetched: text.length > 0,
+          buildIdPresent: /^[a-z0-9]{6,40}$/.test(buildId),
+          versionFromQuery: /searchParams\.get\(\s*["']v["']\s*\)/.test(text),
+          noHardcodedVersion: !/const\s+VERSION\s*=\s*["']pharma-v\d+["']/.test(text),
+          skipWaiting: text.includes("skipWaiting"),
+          clientsClaim: text.includes("clients.claim"),
+          networkFirst: text.includes("networkFirst") && !text.includes("staleWhileRevalidate"),
+          tenantCache: text.includes("pharma_tid"),
+        };
+        const pass = Object.values(c).every(Boolean);
+        return {
+          pass,
+          detail: pass
+            ? `شناسه‌ی build=${buildId}؛ نسخه‌ی سرویس‌ورکر از ?v= خوانده می‌شود، network-first و skipWaiting/claim فعال است`
+            : `ناموفق: ${JSON.stringify(c)} شناسه‌ی build=«${buildId}»`,
+        };
+      });
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -583,7 +638,7 @@ export async function GET(request: NextRequest) {
   const passed = results.filter((r) => r.pass).length;
   const failed = results.length - passed;
   return NextResponse.json({
-    ok: !setupError && failed === 0 && results.length >= 13,
+    ok: !setupError && failed === 0 && results.length >= 15,
     passed,
     failed,
     ...(setupError ? { setupError } : {}),
