@@ -759,14 +759,24 @@ async function realRelations(c: Queryable): Promise<Set<string>> {
  * نقش بدون رمز نمی‌تواند با رمز وارد شود.
  */
 async function appRuntimeRole(c: Queryable): Promise<MigrationResult> {
+  // نقش با ویژگی‌های پیش‌فرض امن ساخته می‌شود (بدون SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE/REPLICATION).
+  // ALTER ROLE فقط وقتی لازم باشد اجرا می‌شود: در Supabase/PostgreSQL 16 نقش postgres اجازه‌ی
+  // «ALTER ROLE ... NOREPLICATION/NOBYPASSRLS» را حتی برای نقش تازه‌ساخته ندارد.
   await c.query(
     `DO $$ BEGIN
        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
-         CREATE ROLE ${APP_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+         CREATE ROLE ${APP_ROLE} LOGIN;
        END IF;
-     END $$;
-     ALTER ROLE ${APP_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;`
+     END $$;`
   );
+  const { rows: attrs } = await c.query(
+    "SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolreplication, rolcanlogin FROM pg_roles WHERE rolname = $1",
+    [APP_ROLE]
+  );
+  const a = attrs[0];
+  if (a && (a.rolsuper || a.rolbypassrls || a.rolcreatedb || a.rolcreaterole || a.rolreplication || !a.rolcanlogin)) {
+    await c.query(`ALTER ROLE ${APP_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`);
+  }
   const real = await realRelations(c);
   const stmts: string[] = [
     `GRANT USAGE ON SCHEMA public TO ${APP_ROLE}`,
@@ -943,7 +953,9 @@ export interface MigrationReport {
 function errText(e: unknown): string {
   if (e instanceof Error) {
     const cause = (e as { cause?: unknown }).cause;
-    return cause instanceof Error ? `${e.message} | علت: ${cause.message}` : e.message;
+    const detail = (e as { detail?: string }).detail;
+    const base = cause instanceof Error ? `${e.message} | علت: ${cause.message}` : e.message;
+    return detail ? `${base} | جزئیات: ${detail}` : base;
   }
   return String(e);
 }
