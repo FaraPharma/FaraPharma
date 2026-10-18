@@ -52,7 +52,7 @@ const EMAIL_PATTERN = "selftest-%@invalid.test";
 const NOTE = "SELFTEST";
 const LOCK_ID = 7270001;
 
-type Row = { name: string; pass: boolean; detail: string; skipped?: boolean; warning?: boolean };
+type Row = { name: string; pass: boolean; detail: string; skipped?: boolean; warning?: boolean; ms?: number };
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export async function GET(request: NextRequest) {
@@ -106,6 +106,10 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
+  // ?stage=old فقط آزمون‌های ۱ تا ۱۴؛ ?stage=new فقط آزمون‌های ۱۵ تا ۲۱ (پیش‌فرض: همه)
+  const stageParam = new URL(request.url).searchParams.get("stage");
+  const stage = stageParam === "old" || stageParam === "new" ? stageParam : "all";
+  const t0All = Date.now();
 
   const pool = new Pool({
     connectionString: url,
@@ -177,11 +181,21 @@ export async function GET(request: NextRequest) {
   const has = (arr: Json[] | undefined, id: string, key = "id") => (arr ?? []).some((x) => x[key] === id);
 
   async function test(name: string, fn: () => Promise<{ pass: boolean; detail: string; warning?: boolean }>) {
+    const t0 = Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const r = await fn();
-      results.push({ name, pass: r.pass, detail: r.detail, ...(r.warning ? { warning: true } : {}) });
+      // هر آزمون حداکثر ۳۰ ثانیه؛ اگر گیر کرد همان آزمون «شکست» می‌شود و بقیه ادامه می‌دهند
+      const r = await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("بیش از ۳۰ ثانیه طول کشید (گیر کرده)")), 30_000);
+        }),
+      ]);
+      results.push({ name, pass: r.pass, detail: r.detail, ms: Date.now() - t0, ...(r.warning ? { warning: true } : {}) });
     } catch (e) {
-      results.push({ name, pass: false, detail: `خطا: ${errMsg(e)}` });
+      results.push({ name, pass: false, detail: `خطا: ${errMsg(e)}`, ms: Date.now() - t0 });
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
   const dbOne = async (sql: string, p: unknown[]) =>
@@ -254,6 +268,7 @@ export async function GET(request: NextRequest) {
       const tenantB = S.userB as string;
       const vB = S.vB as string;
 
+      if (stage !== "new") {
       // ---------- ۱) ده ثبت همزمان ----------
       await test("۱) ده ثبت سفارش همزمان", async () => {
         const runId = crypto.randomUUID();
@@ -594,6 +609,9 @@ export async function GET(request: NextRequest) {
         };
       });
 
+      }
+
+      if (stage !== "old") {
       // ================= مرحله‌ی ۳ب: نقش app_runtime و RLS =================
       // ---------- ۱۵) نقش اتصال فعلی برنامه ----------
       await test("۱۵) اتصال برنامه (DATABASE_URL) ممتاز نیست (بدون SUPERUSER/BYPASSRLS)", async () => {
@@ -634,7 +652,7 @@ export async function GET(request: NextRequest) {
           rtWhy = "APP_RUNTIME_PASSWORD تنظیم نشده (و DATABASE_URL هنوز نقش app_runtime نیست)";
         }
         if (connStr) {
-          const cl = new Client({ connectionString: connStr, connectionTimeoutMillis: 20_000 });
+          const cl = new Client({ connectionString: connStr, connectionTimeoutMillis: 15_000, query_timeout: 15_000, statement_timeout: 15_000 });
           cl.on("error", () => undefined);
           await cl.connect();
           const who = await cl.query("SELECT current_user AS u");
@@ -799,6 +817,7 @@ export async function GET(request: NextRequest) {
             : `ناموفق — ناقص: [${bad.join("، ")}] جدول گم‌شده: [${missing.join("، ")}] — ابتدا /api/admin/migrate?confirm=yes را اجرا کنید`,
         };
       });
+      }
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -851,7 +870,8 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length;
   const failed = results.length - passed - skipped;
-  const ok = !setupError && failed === 0 && results.length >= 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : 22;
+  const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
     // کامل = بدون شکست، بدون «اجرا نشد» و بدون هشدار (یعنی برنامه با نقش app_runtime کار می‌کند و همه چیز راستی‌آزمایی شد)
@@ -860,6 +880,8 @@ export async function GET(request: NextRequest) {
     failed,
     skipped,
     warnings,
+    stage,
+    totalMs: Date.now() - t0All,
     ...(setupError ? { setupError } : {}),
     tests: results,
   });
