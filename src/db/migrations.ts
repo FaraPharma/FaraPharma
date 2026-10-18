@@ -733,6 +733,169 @@ async function seedAdminAndCatalog(c: Queryable): Promise<MigrationResult> {
   return info;
 }
 
+
+/* ───────────── مرحله‌ی ۳ب: نقش app_runtime و RLS واقعی ───────────── */
+
+export const APP_ROLE = "app_runtime";
+
+/** جدول‌هایی که برنامه با نقش runtime روی آن‌ها خواندن/نوشتن کامل دارد */
+const RUNTIME_RW_TABLES = [...TENANT_TABLES, "login_attempts"];
+/** حداقل دسترسی: بدون DELETE (حذف کاربر/پروفایل فقط با اتصال ممتاز) */
+const RUNTIME_RWNODEL_TABLES = ["users", "profiles"];
+/** فقط خواندن */
+const RUNTIME_RO_TABLES = ["base_products", "schema_migrations"];
+
+async function realRelations(c: Queryable): Promise<Set<string>> {
+  const { rows } = await c.query(
+    `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v')`
+  );
+  return new Set(rows.map((r) => String(r.relname)));
+}
+
+/**
+ * نقش app_runtime: LOGIN، بدون SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE و بدون هیچ دسترسی DDL.
+ * رمز در این مهاجرت تنظیم نمی‌شود (syncRuntimeRolePassword در هر اجرا انجام می‌دهد)؛
+ * نقش بدون رمز نمی‌تواند با رمز وارد شود.
+ */
+async function appRuntimeRole(c: Queryable): Promise<MigrationResult> {
+  await c.query(
+    `DO $$ BEGIN
+       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
+         CREATE ROLE ${APP_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+       END IF;
+     END $$;
+     ALTER ROLE ${APP_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;`
+  );
+  const real = await realRelations(c);
+  const stmts: string[] = [
+    `GRANT USAGE ON SCHEMA public TO ${APP_ROLE}`,
+    `REVOKE CREATE ON SCHEMA public FROM ${APP_ROLE}`,
+    // PUBLIC در PostgreSQL ≤ 14 اجازه‌ی CREATE دارد؛ اگر اجازه‌ی تغییر نبود نادیده گرفته می‌شود (آزمون ۲۰ بررسی می‌کند)
+    `DO $$ BEGIN REVOKE CREATE ON SCHEMA public FROM PUBLIC; EXCEPTION WHEN insufficient_privilege THEN NULL; END $$`,
+    `REVOKE ALL ON ALL TABLES IN SCHEMA public FROM ${APP_ROLE}`,
+    `REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM ${APP_ROLE}`,
+  ];
+  for (const t of RUNTIME_RW_TABLES) if (real.has(t)) stmts.push(`GRANT SELECT, INSERT, UPDATE, DELETE ON public.${t} TO ${APP_ROLE}`);
+  for (const t of RUNTIME_RWNODEL_TABLES) if (real.has(t)) stmts.push(`GRANT SELECT, INSERT, UPDATE ON public.${t} TO ${APP_ROLE}`);
+  for (const t of RUNTIME_RO_TABLES) if (real.has(t)) stmts.push(`GRANT SELECT ON public.${t} TO ${APP_ROLE}`);
+  stmts.push(
+    `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${APP_ROLE}`,
+    // جدول‌های آینده (ساخته‌شده توسط همین نقش مهاجرت)
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${APP_ROLE}`,
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${APP_ROLE}`
+  );
+  for (const q of stmts) await c.query(q);
+  return { role: APP_ROLE, grantedTables: RUNTIME_RW_TABLES.concat(RUNTIME_RWNODEL_TABLES, RUNTIME_RO_TABLES).filter((t) => real.has(t)).length };
+}
+
+const GUC_TENANT = `NULLIF(current_setting('app.tenant_id', true), '')::uuid`;
+const GUC_USER = `NULLIF(current_setting('app.user_id', true), '')::uuid`;
+const GUC_EMAIL = `NULLIF(current_setting('app.login_email', true), '')`;
+const IS_ADMIN = `current_setting('app.role', true) = 'admin'`;
+
+/**
+ * RLS واقعی با FORCE.
+ *  - بدون app.tenant_id (یا خالی) هیچ ردیفی دیده نمی‌شود (NULLIF: رشته‌ی خالی هم صفر ردیف، نه خطا).
+ *  - users/profiles/login_attempts قبل از شناخت tenant استفاده می‌شوند؛ فقط با GUC باریک:
+ *      app.login_email (ردیف همان ایمیل)، app.user_id (ردیف همان کاربر و پروفایل‌اش).
+ *  - base_products مشترک: همه فقط می‌خوانند؛ نوشتن فقط مدیر.
+ */
+async function rlsForcePolicies(c: Queryable): Promise<MigrationResult> {
+  const real = await realRelations(c);
+  const { rows } = await c.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public'");
+  const tables = new Set(rows.map((r) => String(r.tablename)));
+  const parts: string[] = [];
+  const enable = (t: string) => {
+    parts.push(`ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`, `ALTER TABLE ${t} FORCE ROW LEVEL SECURITY;`);
+  };
+  const policy = (t: string, name: string, cmd: string, using?: string, check?: string) => {
+    parts.push(
+      `DROP POLICY IF EXISTS ${name} ON ${t};`,
+      `CREATE POLICY ${name} ON ${t} FOR ${cmd}${using ? ` USING (${using})` : ""}${check ? ` WITH CHECK (${check})` : ""};`
+    );
+  };
+  const tenantTables = TENANT_TABLES.filter((t) => tables.has(t) && real.has(t));
+  for (const t of tenantTables) {
+    enable(t);
+    policy(t, `${t}_tenant_policy`, "ALL", `tenant_id = ${GUC_TENANT}`, `tenant_id = ${GUC_TENANT}`);
+    policy(t, `${t}_admin_policy`, "ALL", IS_ADMIN, IS_ADMIN);
+  }
+  if (tables.has("profiles")) {
+    enable("profiles");
+    policy("profiles", "profiles_owner_policy", "ALL", `id = ${GUC_TENANT} OR ${IS_ADMIN}`, `id = ${GUC_TENANT} OR ${IS_ADMIN}`);
+    // ورود: پیدا کردن پروفایل با شناسه‌ی کاربرِ همان درخواست (فقط خواندن)
+    policy("profiles", "profiles_login_select", "SELECT", `owner_user_id = ${GUC_USER}`);
+  }
+  if (tables.has("users")) {
+    enable("users");
+    policy("users", "users_self_select", "SELECT", `id = ${GUC_USER} OR email = ${GUC_EMAIL}`);
+    policy("users", "users_register_insert", "INSERT", undefined, `id = ${GUC_USER}`);
+    policy("users", "users_admin_policy", "ALL", IS_ADMIN, IS_ADMIN);
+  }
+  if (tables.has("login_attempts")) {
+    enable("login_attempts");
+    policy("login_attempts", "login_attempts_email_policy", "ALL", `email = ${GUC_EMAIL}`, `email = ${GUC_EMAIL}`);
+    policy("login_attempts", "login_attempts_admin_policy", "ALL", IS_ADMIN, IS_ADMIN);
+  }
+  if (tables.has("base_products")) {
+    enable("base_products");
+    policy("base_products", "base_products_select_policy", "SELECT", "true");
+    policy("base_products", "base_products_admin_policy", "ALL", IS_ADMIN, IS_ADMIN);
+  }
+  await c.query(parts.join("\n"));
+  return { rlsForcedTables: tenantTables.length + ["profiles", "users", "login_attempts", "base_products"].filter((t) => tables.has(t)).length };
+}
+
+/* ───── رمز نقش runtime: به‌صورت verifier از نوع SCRAM-SHA-256 (رمز خام هرگز در SQL/لاگ/JSON نمی‌آید) ───── */
+
+const te = new TextEncoder();
+const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
+
+async function hmacSha256(key: Uint8Array, msg: string): Promise<Uint8Array> {
+  const k = await crypto.subtle.importKey("raw", key as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", k, te.encode(msg)));
+}
+
+/** verifier سازگار با PostgreSQL (RFC 5802/7677) */
+export async function scramVerifier(password: string, salt?: Uint8Array, iterations = 4096): Promise<string> {
+  const s = salt ?? crypto.getRandomValues(new Uint8Array(16));
+  const pk = await crypto.subtle.importKey("raw", te.encode(password) as BufferSource, "PBKDF2", false, ["deriveBits"]);
+  const salted = new Uint8Array(
+    await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: s as BufferSource, iterations }, pk, 256)
+  );
+  const clientKey = await hmacSha256(salted, "Client Key");
+  const storedKey = new Uint8Array(await crypto.subtle.digest("SHA-256", clientKey as BufferSource));
+  const serverKey = await hmacSha256(salted, "Server Key");
+  return `SCRAM-SHA-256$${iterations}:${b64(s)}$${b64(storedKey)}:${b64(serverKey)}`;
+}
+
+export interface RuntimeRoleStatus {
+  exists: boolean;
+  passwordSet: boolean;
+  note?: string;
+}
+
+/**
+ * در هر اجرای مهاجرت: اگر APP_RUNTIME_PASSWORD تنظیم باشد رمز نقش app_runtime هم‌گام می‌شود،
+ * وگرنه فقط همین بخش رد می‌شود (خطای کلی نیست). مقدار رمز هرگز چاپ نمی‌شود.
+ */
+async function syncRuntimeRolePassword(c: Queryable): Promise<RuntimeRoleStatus> {
+  const { rows } = await c.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [APP_ROLE]);
+  if (rows.length === 0) return { exists: false, passwordSet: false, note: "نقش app_runtime هنوز ساخته نشده (مهاجرت ۰۰۹ اجرا نشده)" };
+  const pw = process.env.APP_RUNTIME_PASSWORD;
+  if (!pw) return { exists: true, passwordSet: false, note: "APP_RUNTIME_PASSWORD تنظیم نشده" };
+  if (pw.length < 16 || !/^[\x21-\x7e]+$/.test(pw)) {
+    return { exists: true, passwordSet: false, note: "APP_RUNTIME_PASSWORD معتبر نیست (حداقل ۱۶ کاراکتر، فقط حروف انگلیسی/عدد/نماد، بدون فاصله)" };
+  }
+  const verifier = await scramVerifier(pw);
+  if (!/^SCRAM-SHA-256\$\d+:[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/.test(verifier)) {
+    return { exists: true, passwordSet: false, note: "ساخت verifier ناموفق بود" };
+  }
+  await c.query(`ALTER ROLE ${APP_ROLE} PASSWORD '${verifier}'`);
+  return { exists: true, passwordSet: true };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -744,6 +907,9 @@ export const MIGRATIONS: Migration[] = [
   { name: "007_seed_admin_and_catalog", up: seedAdminAndCatalog },
   // هماهنگ‌سازی نهایی با schema.ts: ستون گم‌شده اضافه می‌شود، ستون‌های اجباریِ بی‌استفاده اختیاری می‌شوند
   { name: "008_reconcile_schema_with_code", up: reconcileSchema },
+  // مرحله‌ی ۳ب
+  { name: "009_app_runtime_role_and_grants", up: appRuntimeRole },
+  { name: "010_rls_force_and_auth_policies", up: rlsForcePolicies },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);
@@ -770,6 +936,8 @@ export interface MigrationReport {
   pending: string[];
   failed?: { name: string; error: string };
   error?: string;
+  /** وضعیت نقش app_runtime و رمز آن (بدون خطای کلی؛ رمز هرگز چاپ نمی‌شود) */
+  runtimeRole?: RuntimeRoleStatus & { error?: string };
 }
 
 function errText(e: unknown): string {
@@ -807,6 +975,11 @@ export async function runMigrations(opts: { force?: boolean } = {}): Promise<Mig
   }
   let locked = false;
   try {
+    const who = await client.query("SELECT current_user AS u");
+    if (who.rows[0]?.u === APP_ROLE) {
+      report.error = "اتصال مهاجرت با نقش app_runtime است؛ MIGRATE_DATABASE_URL (ممتاز) را تنظیم کنید";
+      return report;
+    }
     const g = await client.query("SELECT pg_try_advisory_lock($1) AS got", [MIGRATE_LOCK_ID]);
     locked = g.rows[0]?.got === true;
     if (!locked) {
@@ -845,6 +1018,17 @@ export async function runMigrations(opts: { force?: boolean } = {}): Promise<Mig
     const appliedNames = new Set([...done, ...report.applied.map((a) => a.name)]);
     report.pending = MIGRATION_NAMES.filter((n) => !appliedNames.has(n));
     report.ok = !report.failed && report.pending.length === 0;
+    // رمز نقش runtime (خارج از مهاجرت‌های ثبت‌شده تا با تنظیم متغیر در هر زمان قابل اجرا باشد)
+    if (!report.failed) {
+      try {
+        await client.query("BEGIN");
+        report.runtimeRole = await syncRuntimeRolePassword(client);
+        await client.query("COMMIT");
+      } catch (e) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        report.runtimeRole = { exists: true, passwordSet: false, error: errText(e) };
+      }
+    }
   } catch (e) {
     report.error = errText(e);
   } finally {
