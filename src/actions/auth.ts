@@ -2,7 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import { randomUUID } from "crypto";
-import { db, AppError, ensureDb } from "@/db";
+import { AppError, ensureDb, withAuthCtx } from "@/db";
 import { users, profiles } from "@/db/schema";
 import {
   hashPassword,
@@ -76,33 +76,36 @@ async function registerImpl(input: {
   if (password.length < 8)
     return { ok: false, error: "رمز عبور باید حداقل ۸ کاراکتر باشد" };
 
-  const existing = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, email))
-    .limit(1);
-  if (existing.length > 0)
-    return { ok: false, error: "این ایمیل قبلاً ثبت شده است" };
-
   const userId = randomUUID();
   const profileId = randomUUID();
   const passwordHash = await hashPassword(password);
   const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 86_400_000);
 
-  await db.insert(users).values({
-    id: userId,
-    email,
-    passwordHash,
-    role: "owner",
+  // یک تراکنش: بررسی تکراری بودن ایمیل + ساخت کاربر و پروفایل (RLS فقط همین ایمیل/شناسه‌ها را باز می‌کند)
+  const created = await withAuthCtx({ email, userId, tenantId: profileId }, async (tx) => {
+    const existing = await tx
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+    if (existing.length > 0) return false;
+    await tx.insert(users).values({
+      id: userId,
+      email,
+      passwordHash,
+      role: "owner",
+    });
+    await tx.insert(profiles).values({
+      id: profileId,
+      ownerUserId: userId,
+      name,
+      phone: input.phone?.trim() || null,
+      status: "trial",
+      trialEndsAt,
+    });
+    return true;
   });
-  await db.insert(profiles).values({
-    id: profileId,
-    ownerUserId: userId,
-    name,
-    phone: input.phone?.trim() || null,
-    status: "trial",
-    trialEndsAt,
-  });
+  if (!created) return { ok: false, error: "این ایمیل قبلاً ثبت شده است" };
 
   await setSessionCookie({ sub: userId, tid: profileId, role: "owner", email });
   // بدون redirect سمت سرور — ناوبری در کلاینت انجام میشود (سازگار با Netlify)
@@ -135,7 +138,9 @@ async function loginImpl(input: {
     };
   }
 
-  const rows = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  const rows = await withAuthCtx({ email }, (tx) =>
+    tx.select().from(users).where(eq(users.email, email)).limit(1)
+  );
   const user = rows[0];
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     const failed = await recordFailedLogin(email);
@@ -154,11 +159,9 @@ async function loginImpl(input: {
   // ورود موفق → شمارنده تلاشها صفر میشود
   await clearLoginAttempts(email);
 
-  const pRows = await db
-    .select()
-    .from(profiles)
-    .where(eq(profiles.ownerUserId, user.id))
-    .limit(1);
+  const pRows = await withAuthCtx({ userId: user.id }, (tx) =>
+    tx.select().from(profiles).where(eq(profiles.ownerUserId, user.id)).limit(1)
+  );
   const profile = pRows[0];
   if (!profile) return { ok: false, error: "پروفایل داروخانه یافت نشد" };
 
