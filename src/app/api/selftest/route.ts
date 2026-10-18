@@ -6,7 +6,8 @@ import { requireAdmin, signSession } from "@/lib/auth";
 import { AUTH_COOKIE } from "@/lib/config";
 import { ensureDb } from "@/db/bootstrap";
 import { diffSchema } from "@/db/schema-check";
-import { listPendingMigrations, runMigrations } from "@/db/migrations";
+import { APP_ROLE, listPendingMigrations, runMigrations } from "@/db/migrations";
+import { pool as appPool } from "@/db/pool";
 import { registerAction } from "@/actions/auth";
 import { effectiveStatus } from "@/lib/format";
 import { addVisitorAction, deleteVisitorAction } from "@/actions/visitors";
@@ -38,6 +39,9 @@ import { GET as visitorsGET } from "@/app/api/visitors/route";
  * آزمون‌های ۱۰ تا ۱۲: مقایسه‌ی اسکیمای واقعی با schema.ts، ثبت‌نام آزمایشی با اکشن واقعی
  *   (کوکی نشست مدیر برگردانده می‌شود) و اجرای دوباره‌ی مهاجرت‌ها با اتصال ممتاز (اشتراک مدیر ثابت بماند).
  * آزمون‌های ۱۳ و ۱۴: هدر no-cache روی /sw.js و /manifest.json (از مسیر واقعی Workers) و وجود شناسه‌ی نسخه/منطق به‌روزرسانی در sw.js.
+ * آزمون‌های ۱۵ تا ۲۱ (مرحله‌ی ۳ب): نقش اتصال برنامه، و با اتصال جداگانه به app_runtime (همه داخل تراکنش با ROLLBACK):
+ *   صفر ردیف بدون tenant، فقط ردیف‌های A، رد INSERT بیگانه، UPDATE/DELETE بیگانه، نبود DDL؛ و RLS+FORCE روی همه‌ی جدول‌ها.
+ *   اگر اتصال app_runtime ممکن نباشد آن آزمون‌ها «اجرا نشد» می‌شوند (skipped، نه pass).
  * آزمون ۹: وضعیت اشتراک پروفایل مدیر موقتاً «آزمایشی-منقضی» می‌شود (commit می‌شود تا اکشن‌های
  *   واقعی ببینند) و در finally حتماً به مقدار اصلی برمی‌گردد؛ مقدار قبلی در پاک‌سازی هم بررسی می‌شود.
  */
@@ -48,7 +52,7 @@ const EMAIL_PATTERN = "selftest-%@invalid.test";
 const NOTE = "SELFTEST";
 const LOCK_ID = 7270001;
 
-type Row = { name: string; pass: boolean; detail: string };
+type Row = { name: string; pass: boolean; detail: string; skipped?: boolean; warning?: boolean };
 type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export async function GET(request: NextRequest) {
@@ -64,8 +68,10 @@ export async function GET(request: NextRequest) {
       { status: 400 }
     );
   }
-  const url = process.env.DATABASE_URL;
-  if (!url) {
+  const appUrl = process.env.DATABASE_URL;
+  // اتصال‌های خودِ آزمون (قفل، پاک‌سازی، شمارش مستقیم) ممتاز هستند؛ کوئری‌های برنامه با DATABASE_URL می‌روند
+  const url = process.env.MIGRATE_DATABASE_URL || appUrl;
+  if (!appUrl || !url) {
     return NextResponse.json({ ok: false, error: "DATABASE_URL تنظیم نشده است" }, { status: 500 });
   }
   try {
@@ -170,10 +176,10 @@ export async function GET(request: NextRequest) {
   const backupA = async () => getJson(await backupGET());
   const has = (arr: Json[] | undefined, id: string, key = "id") => (arr ?? []).some((x) => x[key] === id);
 
-  async function test(name: string, fn: () => Promise<{ pass: boolean; detail: string }>) {
+  async function test(name: string, fn: () => Promise<{ pass: boolean; detail: string; warning?: boolean }>) {
     try {
       const r = await fn();
-      results.push({ name, pass: r.pass, detail: r.detail });
+      results.push({ name, pass: r.pass, detail: r.detail, ...(r.warning ? { warning: true } : {}) });
     } catch (e) {
       results.push({ name, pass: false, detail: `خطا: ${errMsg(e)}` });
     }
@@ -587,6 +593,212 @@ export async function GET(request: NextRequest) {
             : `ناموفق: ${JSON.stringify(c)} شناسه‌ی build=«${buildId}»`,
         };
       });
+
+      // ================= مرحله‌ی ۳ب: نقش app_runtime و RLS =================
+      // ---------- ۱۵) نقش اتصال فعلی برنامه ----------
+      await test("۱۵) اتصال برنامه (DATABASE_URL) ممتاز نیست (بدون SUPERUSER/BYPASSRLS)", async () => {
+        const r = await appPool.query(
+          "SELECT current_user AS u, r.rolsuper AS su, r.rolbypassrls AS br FROM pg_roles r WHERE r.rolname = current_user"
+        );
+        const row = r.rows[0] as Json | undefined;
+        if (!row) return { pass: false, detail: "نقش اتصال فعلی در pg_roles پیدا نشد" };
+        if (row.su || row.br) {
+          return {
+            pass: true,
+            warning: true,
+            detail: `هشدار: اتصال فعلی برنامه (${row.u}) ${row.su ? "SUPERUSER" : ""}${row.su && row.br ? " و " : ""}${row.br ? "BYPASSRLS" : ""} است، پس RLS برای برنامه اعمال نمی‌شود. بعد از ساخت نقش، DATABASE_URL را به app_runtime تغییر دهید`,
+          };
+        }
+        return { pass: true, detail: `اتصال برنامه با نقش «${row.u}» است و ممتاز نیست؛ RLS واقعاً اعمال می‌شود` };
+      });
+
+      // ---------- اتصال جداگانه به نقش app_runtime (برای آزمون‌های ۱۶ تا ۲۰) ----------
+      let rt: Client | null = null;
+      let rtWhy = "";
+      const rtPassEnv = process.env.APP_RUNTIME_PASSWORD;
+      const scrub = (m: string) => (rtPassEnv ? m.split(rtPassEnv).join("***") : m);
+      try {
+        const appU = new URL(appUrl);
+        let connStr: string | null = null;
+        if (decodeURIComponent(appU.username).startsWith(APP_ROLE)) {
+          connStr = appUrl; // برنامه همین حالا با app_runtime کار می‌کند
+        } else if (rtPassEnv) {
+          const base = new URL(url);
+          const baseUser = decodeURIComponent(base.username);
+          const dot = baseUser.indexOf(".");
+          const u = new URL(base.toString());
+          u.username = encodeURIComponent(APP_ROLE + (dot >= 0 ? baseUser.slice(dot) : ""));
+          u.password = encodeURIComponent(rtPassEnv);
+          connStr = u.toString();
+        } else {
+          rtWhy = "APP_RUNTIME_PASSWORD تنظیم نشده (و DATABASE_URL هنوز نقش app_runtime نیست)";
+        }
+        if (connStr) {
+          const cl = new Client({ connectionString: connStr, connectionTimeoutMillis: 20_000 });
+          cl.on("error", () => undefined);
+          await cl.connect();
+          const who = await cl.query("SELECT current_user AS u");
+          if (who.rows[0]?.u === APP_ROLE) {
+            rt = cl;
+          } else {
+            await cl.end().catch(() => undefined);
+            rtWhy = `اتصال با نقش «${who.rows[0]?.u}» برقرار شد نه ${APP_ROLE}`;
+          }
+        }
+      } catch (e) {
+        rtWhy = scrub(`اتصال به نقش ${APP_ROLE} ناموفق (مهاجرت‌های ۰۰۹/۰۱۰ و رمز را بررسی کنید): ${errMsg(e)}`);
+      }
+      try {
+        const rtTest = async (name: string, fn: (c: Client) => Promise<{ pass: boolean; detail: string }>) => {
+          if (!rt) {
+            results.push({ name, pass: false, skipped: true, detail: `اجرا نشد: ${rtWhy}` });
+            return;
+          }
+          const c = rt;
+          await test(name, async () => {
+            await c.query("BEGIN");
+            try {
+              return await fn(c);
+            } finally {
+              await c.query("ROLLBACK").catch(() => undefined); // هیچ‌چیز ماندگار نمی‌شود
+            }
+          });
+        };
+        const setCtx = (c: Client, tenant: string, role: string) =>
+          c.query("SELECT set_config('app.tenant_id', $1, true), set_config('app.role', $2, true)", [tenant, role]);
+        const sqlState = async (p: Promise<unknown>) => {
+          try {
+            await p;
+            return null;
+          } catch (e) {
+            return String((e as { code?: string }).code ?? "ERR");
+          }
+        };
+        const tenantB = S.userB as string;
+
+        // ---------- ۱۶) بدون tenant هیچ ردیفی دیده نمی‌شود ----------
+        await rtTest("۱۶) نقش app_runtime بدون app.tenant_id صفر ردیف می‌بیند", async (c) => {
+          const priv = await dbOne("SELECT (SELECT count(*)::int FROM orders) AS o, (SELECT count(*)::int FROM visitors) AS v", []);
+          const cnt = async () =>
+            (await c.query("SELECT (SELECT count(*)::int FROM orders) AS o, (SELECT count(*)::int FROM visitors) AS v")).rows[0] as Json;
+          const unset = await cnt();
+          await c.query("SELECT set_config('app.tenant_id', '', true)");
+          const empty = await cnt();
+          const k = {
+            dataExists: priv.o > 0 && priv.v > 0,
+            unsetZero: unset.o === 0 && unset.v === 0,
+            emptyZero: empty.o === 0 && empty.v === 0,
+          };
+          const pass = Object.values(k).every(Boolean);
+          return {
+            pass,
+            detail: pass
+              ? `با وجود ${priv.o} سفارش و ${priv.v} ویزیتور در دیتابیس، بدون tenant (تنظیم‌نشده یا خالی) صفر ردیف دیده شد`
+              : `ناموفق: ${JSON.stringify(k)} دیده‌شده(تنظیم‌نشده)=${JSON.stringify(unset)} دیده‌شده(خالی)=${JSON.stringify(empty)}`,
+          };
+        });
+
+        // ---------- ۱۷) با tenant A فقط ردیف‌های A ----------
+        await rtTest("۱۷) SELECT * FROM orders بدون WHERE فقط ردیف‌های A را برمی‌گرداند", async (c) => {
+          await setCtx(c, A, "owner");
+          const r = await c.query("SELECT tenant_id FROM orders");
+          const seen = new Set(r.rows.map((x) => String(x.tenant_id)));
+          const priv = await dbOne("SELECT count(*)::int AS other FROM orders WHERE tenant_id <> $1", [A]);
+          const k = { hasRows: r.rows.length > 0, onlyA: seen.size === 1 && seen.has(A), otherTenantsExist: priv.other > 0 };
+          const pass = Object.values(k).every(Boolean);
+          return {
+            pass,
+            detail: pass
+              ? `${r.rows.length} ردیف برگشت و همه مال A بود (در دیتابیس ${priv.other} سفارش داروخانه‌ی دیگر هست که دیده نشد)`
+              : `ناموفق: ${JSON.stringify(k)} tenantهای دیده‌شده=${seen.size}`,
+          };
+        });
+
+        // ---------- ۱۸) INSERT با tenant داروخانه‌ی دیگر رد می‌شود ----------
+        await rtTest("۱۸) INSERT با tenant_id داروخانه‌ی دیگر رد می‌شود", async (c) => {
+          await setCtx(c, A, "owner");
+          const own = await c.query("INSERT INTO visitors (tenant_id, name) VALUES ($1, $2)", [A, `SELFTEST-rls-own-${stamp}`]);
+          const code = await sqlState(c.query("INSERT INTO visitors (tenant_id, name) VALUES ($1, $2)", [tenantB, `SELFTEST-rls-x-${stamp}`]));
+          const k = { ownInsertOk: own.rowCount === 1, otherRejected: code === "42501" };
+          const pass = Object.values(k).every(Boolean);
+          return {
+            pass,
+            detail: pass ? "ثبت برای tenant خودش مجاز و برای داروخانه‌ی دیگر با خطای RLS (42501) رد شد" : `ناموفق: ${JSON.stringify(k)} کد خطا=${code}`,
+          };
+        });
+
+        // ---------- ۱۹) UPDATE/DELETE روی ردیف داروخانه‌ی دیگر صفر ردیف ----------
+        await rtTest("۱۹) UPDATE و DELETE روی ردیف داروخانه‌ی دیگر صفر ردیف را تغییر می‌دهد", async (c) => {
+          const priv = await dbOne(
+            "SELECT (SELECT count(*)::int FROM visitors WHERE tenant_id = $1) AS v, (SELECT count(*)::int FROM orders WHERE tenant_id = $1) AS o",
+            [tenantB]
+          );
+          await setCtx(c, A, "owner");
+          const u1 = await c.query("UPDATE visitors SET name = name WHERE tenant_id = $1", [tenantB]);
+          const u2 = await c.query("UPDATE orders SET note = note WHERE tenant_id = $1", [tenantB]);
+          const d1 = await c.query("DELETE FROM visitors WHERE tenant_id = $1", [tenantB]);
+          const d2 = await c.query("DELETE FROM orders WHERE tenant_id = $1", [tenantB]);
+          const k = {
+            dataExists: priv.v > 0 && priv.o > 0,
+            updatesZero: u1.rowCount === 0 && u2.rowCount === 0,
+            deletesZero: d1.rowCount === 0 && d2.rowCount === 0,
+          };
+          const pass = Object.values(k).every(Boolean);
+          return {
+            pass,
+            detail: pass
+              ? `داروخانه‌ی B ${priv.v} ویزیتور و ${priv.o} سفارش دارد؛ UPDATE و DELETE از طرف A روی هیچ‌کدام اثر نکرد`
+              : `ناموفق: ${JSON.stringify(k)} update=${u1.rowCount}/${u2.rowCount} delete=${d1.rowCount}/${d2.rowCount}`,
+          };
+        });
+
+        // ---------- ۲۰) بدون DDL و بدون امتیاز ویژه ----------
+        await rtTest("۲۰) نقش app_runtime اجازه‌ی CREATE TABLE و DROP TABLE ندارد", async (c) => {
+          const at = (await c.query("SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = current_user")).rows[0] as Json;
+          await c.query("SAVEPOINT s_create");
+          const createCode = await sqlState(c.query("CREATE TABLE public.selftest_rt_probe (id int)"));
+          await c.query("ROLLBACK TO SAVEPOINT s_create");
+          await c.query("SAVEPOINT s_drop");
+          const dropCode = await sqlState(c.query("DROP TABLE public.quick_notes"));
+          await c.query("ROLLBACK TO SAVEPOINT s_drop");
+          const k = {
+            noPrivilegedAttrs: !at.rolsuper && !at.rolbypassrls && !at.rolcreatedb && !at.rolcreaterole,
+            createDenied: createCode === "42501",
+            dropDenied: dropCode === "42501",
+          };
+          const pass = Object.values(k).every(Boolean);
+          return {
+            pass,
+            detail: pass ? "بدون SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE؛ CREATE TABLE و DROP TABLE با 42501 رد شد" : `ناموفق: ${JSON.stringify(k)} create=${createCode} drop=${dropCode}`,
+          };
+        });
+      } finally {
+        if (rt) await (rt as Client).end().catch(() => undefined);
+      }
+
+      // ---------- ۲۱) RLS فعال و FORCE روی همه‌ی جدول‌های tenant و احراز هویت ----------
+      await test("۲۱) همه‌ی جدول‌های tenant و احراز هویت دارای RLS فعال و FORCE هستند", async () => {
+        const must = ["users", "profiles", "login_attempts", "base_products"];
+        const r = await pool.query(
+          `SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS frc
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+              AND (c.relname = ANY($1)
+                   OR EXISTS (SELECT 1 FROM information_schema.columns k
+                               WHERE k.table_schema = 'public' AND k.table_name = c.relname AND k.column_name = 'tenant_id'))`,
+          [must]
+        );
+        const present = new Set(r.rows.map((x) => String(x.relname)));
+        const missing = must.filter((t) => !present.has(t));
+        const bad = r.rows.filter((x) => !x.rls || !x.frc).map((x) => `${x.relname}(${x.rls ? "" : "بدون RLS"}${!x.rls && !x.frc ? "،" : ""}${x.frc ? "" : "بدون FORCE"})`);
+        const pass = bad.length === 0 && missing.length === 0;
+        return {
+          pass,
+          detail: pass
+            ? `${r.rows.length} جدول (همه‌ی جدول‌های دارای tenant_id + users/profiles/login_attempts/base_products) RLS و FORCE دارند`
+            : `ناموفق — ناقص: [${bad.join("، ")}] جدول گم‌شده: [${missing.join("، ")}] — ابتدا /api/admin/migrate?confirm=yes را اجرا کنید`,
+        };
+      });
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -636,11 +848,18 @@ export async function GET(request: NextRequest) {
   }
 
   const passed = results.filter((r) => r.pass).length;
-  const failed = results.length - passed;
+  const skipped = results.filter((r) => r.skipped).length;
+  const warnings = results.filter((r) => r.warning).length;
+  const failed = results.length - passed - skipped;
+  const ok = !setupError && failed === 0 && results.length >= 22;
   return NextResponse.json({
-    ok: !setupError && failed === 0 && results.length >= 15,
+    ok,
+    // کامل = بدون شکست، بدون «اجرا نشد» و بدون هشدار (یعنی برنامه با نقش app_runtime کار می‌کند و همه چیز راستی‌آزمایی شد)
+    complete: ok && skipped === 0 && warnings === 0,
     passed,
     failed,
+    skipped,
+    warnings,
     ...(setupError ? { setupError } : {}),
     tests: results,
   });
