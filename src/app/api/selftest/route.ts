@@ -633,6 +633,7 @@ export async function GET(request: NextRequest) {
       // ---------- اتصال جداگانه به نقش app_runtime (برای آزمون‌های ۱۶ تا ۲۰) ----------
       let rt: Client | null = null;
       let rtWhy = "";
+      let rtUser = "";
       const rtPassEnv = process.env.APP_RUNTIME_PASSWORD;
       const scrub = (m: string) => (rtPassEnv ? m.split(rtPassEnv).join("***") : m);
       try {
@@ -652,9 +653,23 @@ export async function GET(request: NextRequest) {
           rtWhy = "APP_RUNTIME_PASSWORD تنظیم نشده (و DATABASE_URL هنوز نقش app_runtime نیست)";
         }
         if (connStr) {
-          const cl = new Client({ connectionString: connStr, connectionTimeoutMillis: 15_000, query_timeout: 15_000, statement_timeout: 15_000 });
-          cl.on("error", () => undefined);
-          await cl.connect();
+          rtUser = decodeURIComponent(new URL(connStr).username);
+          // سه تلاش با فاصله‌ی ۱٫۵ ثانیه: Supavisor بعد از تغییر رمز نقش، گاهی در تلاش اول رد می‌کند
+          let cl: Client | null = null;
+          let lastErr: unknown;
+          for (let i = 0; i < 3 && !cl; i++) {
+            const c = new Client({ connectionString: connStr, connectionTimeoutMillis: 15_000, query_timeout: 15_000, statement_timeout: 15_000 });
+            c.on("error", () => undefined);
+            try {
+              await c.connect();
+              cl = c;
+            } catch (e) {
+              lastErr = e;
+              await c.end().catch(() => undefined);
+              if (i < 2) await new Promise((r) => setTimeout(r, 1500));
+            }
+          }
+          if (!cl) throw lastErr;
           const who = await cl.query("SELECT current_user AS u");
           if (who.rows[0]?.u === APP_ROLE) {
             rt = cl;
@@ -664,7 +679,7 @@ export async function GET(request: NextRequest) {
           }
         }
       } catch (e) {
-        rtWhy = scrub(`اتصال به نقش ${APP_ROLE} ناموفق (مهاجرت‌های ۰۰۹/۰۱۰ و رمز را بررسی کنید): ${errMsg(e)}`);
+        rtWhy = scrub(`اتصال به نقش ${APP_ROLE} ناموفق (کاربر اتصال: ${rtUser || "؟"}، ۳ تلاش): ${errMsg(e)}`);
       }
       try {
         const rtTest = async (name: string, fn: (c: Client) => Promise<{ pass: boolean; detail: string }>) => {
