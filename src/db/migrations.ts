@@ -898,7 +898,10 @@ async function syncRuntimeRolePassword(c: Queryable): Promise<RuntimeRoleStatus>
   if (pw.length < 16 || !/^[\x21-\x7e]+$/.test(pw)) {
     return { exists: true, passwordSet: false, note: "APP_RUNTIME_PASSWORD معتبر نیست (حداقل ۱۶ کاراکتر، فقط حروف انگلیسی/عدد/نماد، بدون فاصله)" };
   }
-  const verifier = await scramVerifier(pw);
+  // salt ثابت (مشتق از خود رمز): هر اجرا دقیقاً همان verifier را می‌سازد. salt تصادفی در هر اجرا باعث می‌شد
+  // کش احراز هویت Supavisor با دیتابیس ناهماهنگ شود و ورود با «password authentication failed» رد شود.
+  const salt = (await hmacSha256(te.encode(pw), `salt:${APP_ROLE}`)).slice(0, 16);
+  const verifier = await scramVerifier(pw, salt);
   if (!/^SCRAM-SHA-256\$\d+:[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+$/.test(verifier)) {
     return { exists: true, passwordSet: false, note: "ساخت verifier ناموفق بود" };
   }
