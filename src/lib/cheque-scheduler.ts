@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { db } from "@/db";
+import { withSystemRole } from "@/db";
 import { sendPush } from "@/lib/push";
 
 /**
@@ -24,7 +24,7 @@ export async function sendDueChequeNotifications(): Promise<{
   // - تسویهنشده
   // - فاصله تا سررسید ≤ cheque_warning_days همان تنانت (با tolerance تا ۱ روز آینده)
   // - امروز هنوز اعلان نگرفته
-  const due = await db.execute(sql`
+  const due = await withSystemRole((tx) => tx.execute(sql`
     SELECT
       c.id,
       c.tenant_id,
@@ -40,7 +40,7 @@ export async function sendDueChequeNotifications(): Promise<{
         c.last_notified_at IS NULL
         OR c.last_notified_at::date < CURRENT_DATE
       )
-  `);
+  `));
 
   const rows = due.rows as Array<{
     id: string;
@@ -60,7 +60,7 @@ export async function sendDueChequeNotifications(): Promise<{
     tenant_id: string;
   }> = [];
   if (rows.length > 0) {
-    const q = await db.execute(sql`
+    const q = await withSystemRole((tx) => tx.execute(sql`
       SELECT DISTINCT ps.endpoint, ps.p256dh, ps.auth, ps.tenant_id
       FROM push_subscriptions ps
       JOIN cheques c ON c.tenant_id = ps.tenant_id
@@ -68,7 +68,7 @@ export async function sendDueChequeNotifications(): Promise<{
       WHERE c.settled = false
         AND c.due_date <= (CURRENT_DATE + LEAST(p.cheque_warning_days, 90))
         AND (c.last_notified_at IS NULL OR c.last_notified_at::date < CURRENT_DATE)
-    `);
+    `));
     subs = q.rows as typeof subs;
   }
 
@@ -78,7 +78,7 @@ export async function sendDueChequeNotifications(): Promise<{
     const tenantSubs = subs.filter((s) => s.tenant_id === c.tenant_id);
     if (tenantSubs.length === 0) {
       // اشتراکی نیست؛ ولی برای جلوگیری از ارزیابی مجدد امروز، علامت میزنیم
-      await db.execute(sql`UPDATE cheques SET last_notified_at = now() WHERE id = ${c.id}`);
+      await withSystemRole((tx) => tx.execute(sql`UPDATE cheques SET last_notified_at = now() WHERE id = ${c.id}`));
       continue;
     }
     const d = new Date(`${c.due_date}T00:00:00`);
@@ -107,7 +107,7 @@ export async function sendDueChequeNotifications(): Promise<{
       failed++;
     }
     // جلوگیری از تکرار روزانه — صرفنظر از موفقیت ارسال، برای امروز ثبت میشود
-    await db.execute(sql`UPDATE cheques SET last_notified_at = now() WHERE id = ${c.id}`);
+    await withSystemRole((tx) => tx.execute(sql`UPDATE cheques SET last_notified_at = now() WHERE id = ${c.id}`));
   }
 
   const tenantCount = new Set(rows.map((r) => r.tenant_id)).size;

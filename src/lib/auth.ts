@@ -1,10 +1,8 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
 import { AUTH_COOKIE, getAuthSecret } from "@/lib/config";
-import { AppError, db, type AuthCtx } from "@/db";
-import { users } from "@/db/schema";
+import { AppError, isUserDisabled, type AuthCtx } from "@/db";
 
 export interface SessionPayload {
   sub: string;
@@ -77,12 +75,8 @@ export async function requireAuth(): Promise<AuthCtx> {
   // بررسی زنده‌ی وضعیت غیرفعال‌سازی — برخلاف وضعیت اشتراک (که فقط نوشتن را
   // می‌بندد)، غیرفعال‌سازی توسط ادمین باید فوری و کامل باشد، حتی برای
   // نشست‌های از قبل معتبر.
-  const rows = await db
-    .select({ disabled: users.disabled })
-    .from(users)
-    .where(eq(users.id, ctx.userId))
-    .limit(1);
-  if (rows[0]?.disabled) {
+  const disabled = await isUserDisabled(ctx.userId);
+  if (disabled) {
     await clearSession();
     throw new AppError("دسترسی این حساب توسط مدیر قطع شده است", 403);
   }

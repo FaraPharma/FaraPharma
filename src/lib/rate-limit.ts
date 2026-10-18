@@ -3,7 +3,7 @@
  * جدول login_attempts: email (unique)، count، window_start، locked_until */
 
 import { eq } from "drizzle-orm";
-import { db } from "@/db";
+import { withAuthCtx } from "@/db";
 import { loginAttempts } from "@/db/schema";
 
 const MAX_ATTEMPTS = 5;
@@ -18,11 +18,9 @@ export interface RateCheck {
 /** وضعیت قفل ایمیل را برمیگرداند (بدون تغییر شمارنده) */
 export async function checkLoginLock(email: string): Promise<RateCheck> {
   const key = email.toLowerCase().trim();
-  const rows = await db
-    .select()
-    .from(loginAttempts)
-    .where(eq(loginAttempts.email, key))
-    .limit(1);
+  const rows = await withAuthCtx({ email: key }, (tx) =>
+    tx.select().from(loginAttempts).where(eq(loginAttempts.email, key)).limit(1)
+  );
   const rec = rows[0];
   if (!rec) return { locked: false };
   if (rec.lockedUntil && new Date(rec.lockedUntil).getTime() > Date.now()) {
@@ -40,38 +38,42 @@ export async function checkLoginLock(email: string): Promise<RateCheck> {
 export async function recordFailedLogin(email: string): Promise<RateCheck> {
   const key = email.toLowerCase().trim();
   const now = new Date();
-  const rows = await db
-    .select()
-    .from(loginAttempts)
-    .where(eq(loginAttempts.email, key))
-    .limit(1);
-  const rec = rows[0];
+  const lockedUntilOut = await withAuthCtx({ email: key }, async (tx) => {
+    const rows = await tx
+      .select()
+      .from(loginAttempts)
+      .where(eq(loginAttempts.email, key))
+      .limit(1);
+    const rec = rows[0];
 
-  // پنجره ۱۵ دقیقهای گذشته → شمارنده از نو
-  const fresh = !rec || new Date(rec.windowStart).getTime() <= Date.now() - WINDOW_RESET_MS;
-  const count = fresh ? 1 : rec.count + 1;
-  const lockedUntil =
-    count >= MAX_ATTEMPTS
-      ? new Date(Date.now() + LOCK_MINUTES * 60_000)
-      : null;
+    // پنجره ۱۵ دقیقهای گذشته → شمارنده از نو
+    const fresh = !rec || new Date(rec.windowStart).getTime() <= Date.now() - WINDOW_RESET_MS;
+    const count = fresh ? 1 : rec.count + 1;
+    const lockedUntil =
+      count >= MAX_ATTEMPTS
+        ? new Date(Date.now() + LOCK_MINUTES * 60_000)
+        : null;
 
-  if (!rec) {
-    await db.insert(loginAttempts).values({
-      email: key,
-      count,
-      windowStart: now,
-      lockedUntil,
-    });
-  } else {
-    await db
-      .update(loginAttempts)
-      .set({
+    if (!rec) {
+      await tx.insert(loginAttempts).values({
+        email: key,
         count,
-        windowStart: fresh ? now : rec.windowStart,
+        windowStart: now,
         lockedUntil,
-      })
-      .where(eq(loginAttempts.email, key));
-  }
+      });
+    } else {
+      await tx
+        .update(loginAttempts)
+        .set({
+          count,
+          windowStart: fresh ? now : rec.windowStart,
+          lockedUntil,
+        })
+        .where(eq(loginAttempts.email, key));
+    }
+    return lockedUntil;
+  });
+  const lockedUntil = lockedUntilOut;
 
   if (lockedUntil) {
     return {
@@ -84,7 +86,8 @@ export async function recordFailedLogin(email: string): Promise<RateCheck> {
 
 /** ورود موفق → شمارنده صفر میشود */
 export async function clearLoginAttempts(email: string) {
-  await db
-    .delete(loginAttempts)
-    .where(eq(loginAttempts.email, email.toLowerCase().trim()));
+  const key = email.toLowerCase().trim();
+  await withAuthCtx({ email: key }, (tx) =>
+    tx.delete(loginAttempts).where(eq(loginAttempts.email, key))
+  );
 }
