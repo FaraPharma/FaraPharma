@@ -694,6 +694,15 @@ export async function GET(request: NextRequest) {
         };
         const tenantB = S.userB as string;
 
+        // داده‌ی داروخانه‌ی B (وقتی آزمون‌های ۱ تا ۱۴ اجرا نشده‌اند B سفارشی ندارد): یک سفارش آزمایشی با note استاندارد
+        // تا پاک‌سازی آن را حذف کند. فقط اگر B سفارش ندارد ساخته می‌شود.
+        const bOrders = await dbOne("SELECT count(*)::int AS n FROM orders WHERE tenant_id = $1", [tenantB]);
+        if (Number(bOrders.n) === 0) {
+          await withTx("owner", tenantB, (c) =>
+            c.query("INSERT INTO orders (tenant_id, visitor_id, note, order_no) VALUES ($1, $2, $3, 1)", [tenantB, S.vB, NOTE])
+          );
+        }
+
         // ---------- ۱۶) بدون tenant هیچ ردیفی دیده نمی‌شود ----------
         await rtTest("۱۶) نقش app_runtime بدون app.tenant_id صفر ردیف می‌بیند", async (c) => {
           const priv = await dbOne("SELECT (SELECT count(*)::int FROM orders) AS o, (SELECT count(*)::int FROM visitors) AS v", []);
