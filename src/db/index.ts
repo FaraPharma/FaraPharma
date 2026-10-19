@@ -37,7 +37,7 @@ export async function withTenant<T>(
   await ensureDb();
   return db.transaction(async (tx) => {
     await tx.execute(
-      sql`SELECT set_config('app.tenant_id', ${ctx.tenantId}, true), set_config('app.role', ${ctx.role}, true)`
+      sql`SELECT set_config('app.tenant_id', ${ctx.tenantId}, true), set_config('app.role', ${ctx.role}, true), set_config('app.user_id', ${ctx.userId}, true)`
     );
     return fn(tx);
   });

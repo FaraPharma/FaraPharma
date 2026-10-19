@@ -932,6 +932,32 @@ async function forceRlsRemainingTenantTables(c: Queryable): Promise<MigrationRes
   return { forcedExtraTables: names.length, tables: names.join(",") };
 }
 
+
+/**
+ * مهاجرت افزودنی: تکمیل دسترسی‌های نقش runtime بدون سست کردن RLS.
+ *  - اگر پیش‌فرض ستونی در public به توابع افزونه (schema extensions، مثل uuid_generate_v4) وابسته باشد،
+ *    INSERT با نقش runtime خطای «permission denied for schema extensions» می‌دهد؛ فقط در آن صورت USAGE
+ *    روی همان schema (نه روی جدولی) داده می‌شود. USAGE فقط اجازه‌ی صدا زدن توابع آن را می‌دهد.
+ *  - اجازه‌ی sequenceهای موجود دوباره تضمین می‌شود (idempotent).
+ * جداسازی tenant (سیاست‌های RLS) دست نمی‌خورد.
+ */
+async function runtimeGrantsCompletion(c: Queryable): Promise<MigrationResult> {
+  const info: MigrationResult = {};
+  const { rows: ext } = await c.query("SELECT 1 FROM pg_namespace WHERE nspname = 'extensions'");
+  if (ext.length > 0) {
+    const { rows: defs } = await c.query(
+      `SELECT 1 FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND pg_get_expr(d.adbin, d.adrelid) ~ '(extensions\\.|uuid_generate|gen_random_bytes|crypt\\()' LIMIT 1`
+    );
+    if (defs.length > 0) {
+      await c.query(`GRANT USAGE ON SCHEMA extensions TO ${APP_ROLE}`);
+      info.extensionsUsageGranted = true;
+    }
+  }
+  await c.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${APP_ROLE}`);
+  return info;
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -947,6 +973,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "009_app_runtime_role_and_grants", up: appRuntimeRole },
   { name: "010_rls_force_and_auth_policies", up: rlsForcePolicies },
   { name: "011_force_rls_remaining_tenant_tables", up: forceRlsRemainingTenantTables },
+  { name: "012_runtime_grants_completion", up: runtimeGrantsCompletion },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);
