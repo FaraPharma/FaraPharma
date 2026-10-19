@@ -3,6 +3,7 @@ import { AppError, withTenant } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import { pushSubscriptions } from "@/db/schema";
 import { sendPush } from "@/lib/push";
+import { logServerError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, sent, total: subs.length });
   } catch (e) {
     const status = e instanceof AppError ? e.status : 500;
+    if (status >= 500) logServerError("/api/push/send", e);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "خطای سرور" },
       { status }
