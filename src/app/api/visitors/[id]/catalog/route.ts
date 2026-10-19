@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth";
 import { assertWritable } from "@/db/access";
 import { visitors, catalogFiles } from "@/db/schema";
 import { storage } from "@/lib/storage";
+import { logServerError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +111,7 @@ export async function POST(
     return NextResponse.json({ ok: true, catalogId });
   } catch (e) {
     const status = e instanceof AppError ? e.status : 500;
+    if (status >= 500) logServerError("/api/visitors/[id]/catalog", e);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "خطای سرور" },
       { status }
