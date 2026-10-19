@@ -4,6 +4,7 @@ import { AppError, withTenant } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { profiles, users, visitors, products, orders } from "@/db/schema";
 import { TRIAL_DAYS } from "@/lib/config";
+import { logServerError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,7 @@ export async function GET() {
     return NextResponse.json(data);
   } catch (e) {
     const status = e instanceof AppError ? e.status : 500;
+    if (status >= 500) logServerError("/api/admin/profiles", e);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "خطای سرور" },
       { status }
