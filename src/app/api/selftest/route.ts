@@ -106,9 +106,9 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط آزمون‌های ۱ تا ۱۴؛ ?stage=new فقط آزمون‌های ۱۵ تا ۲۱ (پیش‌فرض: همه)
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
-  const stage = stageParam === "old" || stageParam === "new" ? stageParam : "all";
+  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" ? stageParam : "all";
   const t0All = Date.now();
 
   const pool = new Pool({
@@ -268,7 +268,7 @@ export async function GET(request: NextRequest) {
       const tenantB = S.userB as string;
       const vB = S.vB as string;
 
-      if (stage !== "new") {
+      if (stage === "all" || stage === "old") {
       // ---------- ۱) ده ثبت همزمان ----------
       await test("۱) ده ثبت سفارش همزمان", async () => {
         const runId = crypto.randomUUID();
@@ -611,7 +611,7 @@ export async function GET(request: NextRequest) {
 
       }
 
-      if (stage !== "old") {
+      if (stage === "all" || stage === "new") {
       // ================= مرحله‌ی ۳ب: نقش app_runtime و RLS =================
       // ---------- ۱۵) نقش اتصال فعلی برنامه ----------
       await test("۱۵) اتصال برنامه (DATABASE_URL) ممتاز نیست (بدون SUPERUSER/BYPASSRLS)", async () => {
@@ -842,6 +842,201 @@ export async function GET(request: NextRequest) {
         };
       });
       }
+
+      // ================= تشخیص خطای نقش app_runtime (stage=app) =================
+      if (stage === "app") {
+        const errOf = (e: unknown) => {
+          const x = e as { code?: string; message?: string; table?: string };
+          return { code: String(x.code ?? "ERR"), message: String(x.message ?? e).slice(0, 160) };
+        };
+
+        // ---------- ۲۲) دسترسی‌ها، پیش‌فرض‌ها و تریگرها (با اتصال ممتاز) ----------
+        await test("۲۲) GRANTهای نقش app_runtime، پیش‌فرض ستون‌ها و تریگرها", async () => {
+          const expectPriv: Record<string, string[]> = {};
+          for (const t of ["visitors", "visitor_notes", "products", "visitor_products", "visitor_product_history", "catalog_files", "quick_notes", "cheques", "push_subscriptions", "price_requests", "price_request_items", "price_responses", "orders", "order_items", "order_counters", "login_attempts"]) expectPriv[t] = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+          expectPriv.users = ["SELECT", "INSERT", "UPDATE"];
+          expectPriv.profiles = ["SELECT", "INSERT", "UPDATE"];
+          expectPriv.base_products = ["SELECT"];
+          expectPriv.schema_migrations = ["SELECT"];
+          const missing: string[] = [];
+          for (const [t, privs] of Object.entries(expectPriv)) {
+            for (const pr of privs) {
+              const r = await pool.query("SELECT has_table_privilege($1, $2, $3) AS ok", [APP_ROLE, `public.${t}`, pr]);
+              if (!r.rows[0]?.ok) missing.push(`${t}:${pr}`);
+            }
+          }
+          const sch = await pool.query(
+            "SELECT has_schema_privilege($1, 'public', 'USAGE') AS pub, (SELECT has_schema_privilege($1, 'extensions', 'USAGE') FROM pg_namespace WHERE nspname = 'extensions') AS ext",
+            [APP_ROLE]
+          );
+          const defs = await pool.query(
+            `SELECT c.relname AS t, a.attname AS col, pg_get_expr(d.adbin, d.adrelid) AS expr
+               FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+               JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+              WHERE n.nspname = 'public' AND pg_get_expr(d.adbin, d.adrelid) ~ '(extensions\\.|uuid_generate|gen_random_bytes|crypt\\()'`
+          );
+          const trg = await pool.query(
+            `SELECT c.relname AS t, g.tgname AS name FROM pg_trigger g JOIN pg_class c ON c.oid = g.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public' AND NOT g.tgisinternal`
+          );
+          const seq = await pool.query(
+            `SELECT c.relname AS s, has_sequence_privilege($1, c.oid, 'USAGE') AS ok FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind = 'S'`,
+            [APP_ROLE]
+          );
+          const seqBad = seq.rows.filter((r) => !r.ok).map((r) => String(r.s));
+          const extNeeded = defs.rows.length > 0 && sch.rows[0]?.ext === false;
+          const pass = missing.length === 0 && !!sch.rows[0]?.pub && seqBad.length === 0 && !extNeeded;
+          return {
+            pass,
+            detail:
+              `گم‌شده: [${missing.join("، ") || "هیچ"}] | USAGE روی public=${sch.rows[0]?.pub} روی extensions=${sch.rows[0]?.ext ?? "ندارد"} | ` +
+              `sequenceهای بدون دسترسی: [${seqBad.join("، ") || "هیچ"}] | پیش‌فرض‌های وابسته به extensions: [${defs.rows.map((r) => `${r.t}.${r.col}`).join("، ") || "هیچ"}] | ` +
+              `تریگرها: [${trg.rows.map((r) => `${r.t}.${r.name}`).join("، ") || "هیچ"}]`,
+          };
+        });
+
+        // ---------- ۲۳) همان کوئری‌های برنامه (ورود، نشست، ثبت‌نام، بارگذاری) با اتصال جدا به app_runtime ----------
+        const rtPassEnv2 = process.env.APP_RUNTIME_PASSWORD;
+        let rt2: Client | null = null;
+        let rt2Why = "";
+        try {
+          const appU = new URL(appUrl);
+          let connStr: string | null = null;
+          if (decodeURIComponent(appU.username).startsWith(APP_ROLE)) connStr = appUrl;
+          else if (rtPassEnv2) {
+            const base = new URL(url);
+            const baseUser = decodeURIComponent(base.username);
+            const dot = baseUser.indexOf(".");
+            const u2 = new URL(base.toString());
+            u2.username = encodeURIComponent(APP_ROLE + (dot >= 0 ? baseUser.slice(dot) : ""));
+            u2.password = encodeURIComponent(rtPassEnv2);
+            connStr = u2.toString();
+          } else rt2Why = "APP_RUNTIME_PASSWORD تنظیم نشده";
+          if (connStr) {
+            let cl: Client | null = null;
+            let lastErr: unknown;
+            for (let i = 0; i < 3 && !cl; i++) {
+              const c = new Client({ connectionString: connStr, connectionTimeoutMillis: 15_000, query_timeout: 15_000, statement_timeout: 15_000 });
+              c.on("error", () => undefined);
+              try { await c.connect(); cl = c; } catch (e) { lastErr = e; await c.end().catch(() => undefined); if (i < 2) await new Promise((r) => setTimeout(r, 1500)); }
+            }
+            if (!cl) throw lastErr;
+            rt2 = cl;
+          }
+        } catch (e) {
+          rt2Why = `اتصال app_runtime ناموفق: ${(rtPassEnv2 ? errMsg(e).split(rtPassEnv2).join("***") : errMsg(e))}`;
+        }
+        try {
+          if (!rt2) {
+            results.push({ name: "۲۳) کوئری‌های برنامه با نقش app_runtime (ورود، نشست، ثبت‌نام، بارگذاری)", pass: false, skipped: true, detail: `اجرا نشد: ${rt2Why}` });
+          } else {
+            const c = rt2;
+            await test("۲۳) کوئری‌های برنامه با نقش app_runtime (ورود، نشست، ثبت‌نام، بارگذاری)", async () => {
+              const emailRow = await dbOne("SELECT email FROM users WHERE id = $1", [S.userB]);
+              const e1 = String(emailRow.email);
+              const fails: string[] = [];
+              let total = 0;
+              const guc = (o: { tenant?: string; role?: string; user?: string; email?: string }) =>
+                c.query("SELECT set_config('app.tenant_id', $1, true), set_config('app.role', $2, true), set_config('app.user_id', $3, true), set_config('app.login_email', $4, true)", [o.tenant ?? "", o.role ?? "", o.user ?? "", o.email ?? ""]);
+              const step = async (name: string, q: string, params: unknown[] = []) => {
+                total++;
+                await c.query("SAVEPOINT st");
+                try {
+                  await c.query(q, params);
+                } catch (e) {
+                  const er = errOf(e);
+                  fails.push(`${name} → [${er.code}] ${er.message}`);
+                } finally {
+                  await c.query("ROLLBACK TO SAVEPOINT st").catch(() => undefined);
+                }
+              };
+              await c.query("BEGIN");
+              try {
+                // بدون زمینه (health / middleware / ensureDb)
+                await guc({});
+                await step("health SELECT 1", "SELECT 1");
+                await step("ensureDb: schema_migrations", "SELECT name FROM schema_migrations");
+                // requireAuth: بررسی disabled
+                total++;
+                try {
+                  const r = (await c.query(`SELECT set_config('app.user_id', '${S.userB}', true); SELECT disabled FROM users WHERE id = '${S.userB}'::uuid`)) as unknown as Array<{ rows: Json[] }>;
+                  if (!r[1]?.rows?.length) fails.push("requireAuth: کاربر پیدا نشد (RLS روی users)");
+                } catch (e) { const er = errOf(e); fails.push(`requireAuth(multi-statement) → [${er.code}] ${er.message}`); await c.query("ROLLBACK TO SAVEPOINT st").catch(() => undefined); }
+                // ورود
+                await guc({ email: e1 });
+                await step("login: users بر اساس ایمیل", "SELECT * FROM users WHERE email = $1 LIMIT 1", [e1]);
+                await step("login_attempts: SELECT", "SELECT * FROM login_attempts WHERE email = $1 LIMIT 1", [e1]);
+                await step("login_attempts: INSERT", "INSERT INTO login_attempts (email, count, window_start) VALUES ($1, 1, now())", [e1]);
+                await guc({ email: e1, user: S.userB as string });
+                await step("login: profiles بر اساس owner_user_id", "SELECT * FROM profiles WHERE owner_user_id = $1 LIMIT 1", [S.userB]);
+                // ثبت‌نام
+                const nu = crypto.randomUUID();
+                const ne = `selftest-rt-${crypto.randomUUID()}@invalid.test`;
+                await guc({ email: ne, user: nu, tenant: nu });
+                await step("register: بررسی ایمیل تکراری", "SELECT id FROM users WHERE email = $1 LIMIT 1", [ne]);
+                await step("register: INSERT users", "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, '!x', 'owner')", [nu, ne]);
+                await step("register: INSERT users+profiles", "WITH u AS (INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, '!x', 'owner') RETURNING id) INSERT INTO profiles (id, owner_user_id, name, status, trial_ends_at) SELECT id, id, 'x', 'trial', now() + interval '7 days' FROM u", [nu, ne]);
+                // بارگذاری صفحه‌ی اصلی / API با tenant و نقش owner
+                await guc({ tenant: S.userB as string, role: "owner", user: S.userB as string });
+                for (const t of ["visitors", "visitor_notes", "products", "visitor_products", "visitor_product_history", "catalog_files", "quick_notes", "cheques", "push_subscriptions", "price_requests", "price_request_items", "price_responses", "orders", "order_items", "order_counters"]) {
+                  await step(`owner: SELECT ${t}`, `SELECT count(*) FROM ${t}`);
+                }
+                await step("owner: profiles (خودش)", "SELECT * FROM profiles WHERE id = $1", [S.userB]);
+                await step("owner: base_products", "SELECT count(*) FROM base_products");
+                await step("owner: users (خودش)", "SELECT id FROM users WHERE id = $1", [S.userB]);
+                await step("owner: order_counters upsert", "INSERT INTO order_counters (tenant_id, last_no) VALUES ($1, 0) ON CONFLICT (tenant_id) DO NOTHING", [S.userB]);
+                await step("owner: order_counters FOR UPDATE", "SELECT last_no FROM order_counters WHERE tenant_id = $1 FOR UPDATE", [S.userB]);
+                await step("owner: INSERT visitors", "INSERT INTO visitors (tenant_id, name) VALUES ($1, 'SELFTEST-rt2')", [S.userB]);
+                await step("owner: UPDATE profiles", "UPDATE profiles SET name = name WHERE id = $1", [S.userB]);
+                // مدیر
+                await guc({ tenant: A, role: "admin", user: A });
+                await step("admin: فهرست profiles+users", "SELECT p.id, u.email, u.disabled FROM profiles p LEFT JOIN users u ON u.id = p.owner_user_id LIMIT 5");
+                await step("admin: UPDATE users", "UPDATE users SET disabled = disabled WHERE id = $1", [S.userB]);
+                await step("admin: UPDATE profiles", "UPDATE profiles SET name = name WHERE id = $1", [S.userB]);
+                await step("admin: SELECT orders (همه)", "SELECT count(*) FROM orders");
+              } finally {
+                await c.query("ROLLBACK").catch(() => undefined);
+              }
+              const pass = fails.length === 0;
+              return { pass, detail: pass ? `${total} کوئری برنامه با app_runtime بدون خطا اجرا شد` : `${fails.length} خطا از ${total} کوئری: ${fails.join(" ‖ ")}` };
+            });
+          }
+        } finally {
+          if (rt2) await (rt2 as Client).end().catch(() => undefined);
+        }
+
+        // ---------- ۲۴ و ۲۵) جاروی مسیرهای واقعی با اتصال خود برنامه (DATABASE_URL) ----------
+        const env2 = (getCloudflareContext() as unknown as { env?: { WORKER_SELF_REFERENCE?: { fetch(r: Request): Promise<Response> } } }).env;
+        const selfRef2 = env2?.WORKER_SELF_REFERENCE;
+        const sweep = async (paths: string[], cookie: string, isPage: boolean) => {
+          const bad: string[] = [];
+          for (const path of paths) {
+            try {
+              const res = await selfRef2!.fetch(new Request(`${origin}${path}`, { headers: { cookie }, redirect: "manual" }));
+              const body = res.status >= 400 ? (await res.text()).slice(0, 140).replace(/\s+/g, " ") : (await res.arrayBuffer(), "");
+              const okStatus = isPage ? res.status < 400 : res.status >= 200 && res.status < 300;
+              if (!okStatus) bad.push(`${path} → ${res.status} ${body}`);
+            } catch (e) {
+              bad.push(`${path} → ${errMsg(e)}`);
+            }
+          }
+          return bad;
+        };
+        const tokB = await signSession({ sub: S.userB as string, tid: S.userB as string, role: "owner", email: S.emailB as string });
+        const cookieB = `${AUTH_COOKIE}=${tokB}`;
+        const apiPaths = ["/api/dashboard", "/api/orders", "/api/visitors", "/api/products", "/api/cheques", "/api/shortages", "/api/price-requests", "/api/quick-notes", "/api/history", "/api/base-products", "/api/search?q=a", "/api/backup"];
+        await test("۲۴) مسیرهای API با نشست «صاحب داروخانه» (با اتصال فعلی برنامه)", async () => {
+          if (!selfRef2) return { pass: false, detail: "اجرا نشد: WORKER_SELF_REFERENCE در این محیط نیست" };
+          const bad = await sweep(apiPaths, cookieB, false);
+          return { pass: bad.length === 0, detail: bad.length === 0 ? `${apiPaths.length} مسیر API همگی ۲xx` : `${bad.length} مسیر خطا: ${bad.join(" ‖ ")}` };
+        });
+        const pagePaths = ["/dashboard", "/orders", "/visitors", "/products", "/cheques", "/shortages", "/price-requests", "/quick-notes", "/history", "/settings", "/login", "/register"];
+        await test("۲۵) صفحه‌ها با نشست «صاحب داروخانه» (بدون Internal Server Error)", async () => {
+          if (!selfRef2) return { pass: false, detail: "اجرا نشد: WORKER_SELF_REFERENCE در این محیط نیست" };
+          const bad = await sweep(pagePaths, cookieB, true);
+          return { pass: bad.length === 0, detail: bad.length === 0 ? `${pagePaths.length} صفحه بدون خطای ۴xx/۵xx` : `${bad.length} صفحه خطا: ${bad.join(" ‖ ")}` };
+        });
+      }
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -894,7 +1089,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length;
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
