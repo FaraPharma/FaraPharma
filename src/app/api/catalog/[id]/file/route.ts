@@ -4,6 +4,7 @@ import { AppError, withTenant } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import { catalogFiles } from "@/db/schema";
 import { storage } from "@/lib/storage";
+import { logServerError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,7 @@ export async function GET(
     });
   } catch (e) {
     const status = e instanceof AppError ? e.status : 500;
+    if (status >= 500) logServerError("/api/catalog/[id]/file", e);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "خطای سرور" },
       { status }
