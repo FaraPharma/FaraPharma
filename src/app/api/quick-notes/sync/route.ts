@@ -3,6 +3,7 @@ import { AppError, withTenant } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import { assertWritable } from "@/db/access";
 import { quickNotes } from "@/db/schema";
+import { logServerError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (e) {
     const status = e instanceof AppError ? e.status : 500;
+    if (status >= 500) logServerError("/api/quick-notes/sync", e);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "خطای سرور" },
       { status }
