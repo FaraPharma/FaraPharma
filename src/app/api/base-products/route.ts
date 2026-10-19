@@ -3,6 +3,7 @@ import { asc } from "drizzle-orm";
 import { AppError, withTenant } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import { baseProducts } from "@/db/schema";
+import { logServerError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export async function GET() {
     return NextResponse.json(data);
   } catch (e) {
     const status = e instanceof AppError ? e.status : 500;
+    if (status >= 500) logServerError("/api/base-products", e);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "خطای سرور" },
       { status }
