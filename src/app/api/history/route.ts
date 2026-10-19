@@ -8,6 +8,7 @@ import {
   visitors,
   cheques,
 } from "@/db/schema";
+import { logServerError } from "@/lib/log";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,7 @@ export async function GET() {
     return NextResponse.json(data);
   } catch (e) {
     const status = e instanceof AppError ? e.status : 500;
+    if (status >= 500) logServerError("/api/history", e);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "خطای سرور" },
       { status }
