@@ -18,7 +18,11 @@ import {
   checkLoginLock,
   recordFailedLogin,
   clearLoginAttempts,
+  checkIpLock,
+  recordIpAttempt,
+  ipLockMessage,
 } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/client-ip";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -68,6 +72,13 @@ async function registerImpl(input: {
   password: string;
 }): Promise<ActionResult> {
   await ensureDb();
+  // قفل ثبت‌نام بر اساس IP (هر تلاش می‌شمارد؛ جلوی ساخت انبوه حساب را می‌گیرد)
+  const ip = await getClientIp();
+  if (ip) {
+    const l = await checkIpLock("register", ip);
+    if (l.locked) return { ok: false, error: ipLockMessage(l.retryAfterMin ?? 60) };
+    await recordIpAttempt("register", ip); // همین تلاش شمرده می‌شود؛ تلاش بعد از رسیدن به سقف رد می‌شود
+  }
   const name = (input.pharmacyName ?? "").trim();
   const email = (input.email ?? "").trim().toLowerCase();
   const password = input.password ?? "";
@@ -129,6 +140,13 @@ async function loginImpl(input: {
   if (!EMAIL_RE.test(email) || !password)
     return { ok: false, error: "ایمیل و رمز عبور را وارد کنید" };
 
+  // قفل بر اساس IP: ۱۰ ورود ناموفق در ۱۵ دقیقه ← ۱۵ دقیقه قفل
+  const ip = await getClientIp();
+  if (ip) {
+    const il = await checkIpLock("login-fail", ip);
+    if (il.locked) return { ok: false, error: ipLockMessage(il.retryAfterMin ?? 15) };
+  }
+
   // قفل ۱۵ دقیقهای بعد از ۵ تلاش ناموفق پشتسرهم (دیتابیسمحور)
   const lock = await checkLoginLock(email);
   if (lock.locked) {
@@ -144,6 +162,10 @@ async function loginImpl(input: {
   const user = rows[0];
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     const failed = await recordFailedLogin(email);
+    if (ip) {
+      const ir = await recordIpAttempt("login-fail", ip);
+      if (ir.locked && !failed.locked) return { ok: false, error: ipLockMessage(ir.retryAfterMin ?? 15) };
+    }
     if (failed.locked) {
       return {
         ok: false,

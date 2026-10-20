@@ -5,6 +5,7 @@ import { AppError, withTenant } from "@/db";
 import { profiles, users } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth";
 import { TRIAL_DAYS } from "@/lib/config";
+import { writeAudit } from "@/lib/audit";
 import type { ActionResult } from "@/actions/auth";
 
 /**
@@ -54,6 +55,12 @@ export async function adminSetSubscriptionAction(input: {
           subscriptionEndsAt: input.status === "active" ? subscriptionEndsAt : null,
         })
         .where(eq(profiles.id, input.profileId));
+      await writeAudit(tx, ctx.userId, {
+        action: "subscription.set",
+        targetType: "profile",
+        targetId: input.profileId,
+        detail: { status: input.status, endDate: input.endDate ?? null },
+      });
     });
     return { ok: true };
   } catch (e) {
@@ -82,6 +89,11 @@ export async function adminToggleAccountAction(input: {
         .update(users)
         .set({ disabled: input.disabled })
         .where(eq(users.id, input.userId));
+      await writeAudit(tx, ctx.userId, {
+        action: input.disabled ? "account.disable" : "account.enable",
+        targetType: "user",
+        targetId: input.userId,
+      });
     });
     return { ok: true };
   } catch (e) {
