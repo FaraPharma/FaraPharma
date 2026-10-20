@@ -14,6 +14,7 @@ import {
 } from "@/components/ui";
 import { adminSetSubscriptionAction, adminToggleAccountAction } from "@/actions/admin";
 import { effectiveStatus, faDate, faNum } from "@/lib/format";
+import { AdminAudit } from "@/components/admin-audit";
 
 interface AdminProfile {
   id: string;
@@ -239,6 +240,8 @@ export default function AdminPage() {
           })}
         </div>
       )}
+
+      <AdminAudit />
     </div>
   );
 }
