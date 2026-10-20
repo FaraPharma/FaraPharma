@@ -1,4 +1,4 @@
-import { logServerError } from "@/lib/log";
+import { recordError } from "@/lib/error-log";
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
@@ -15,5 +15,5 @@ export async function onRequestError(
   request: { path: string; method: string },
   context: { routerKind?: string; routePath?: string; routeType?: string }
 ) {
-  logServerError(`${request.method} ${request.path} (${context.routeType ?? "?"}:${context.routePath ?? "?"})`, err);
+  await recordError(`${request.method} ${request.path} (${context.routeType ?? "?"}:${context.routePath ?? "?"})`, err);
 }
