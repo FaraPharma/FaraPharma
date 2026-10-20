@@ -28,6 +28,8 @@ import { GET as backupGET } from "@/app/api/backup/route";
 import { GET as chequesGET } from "@/app/api/cheques/route";
 import { GET as visitorsGET } from "@/app/api/visitors/route";
 import { GET as auditGET } from "@/app/api/admin/audit/route";
+import { GET as errorsGET } from "@/app/api/admin/errors/route";
+import { recordError } from "@/lib/error-log";
 
 /**
  * مسیر آزمایشیِ موقت برای آزمون‌های مرحله‌ی سفارش — فقط مدیر، فقط با ?confirm=yes.
@@ -112,7 +114,7 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۳۴)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۳۵)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
   const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" ? stageParam : "all";
   const t0All = Date.now();
@@ -1375,6 +1377,28 @@ export async function GET(request: NextRequest) {
           return { pass, detail: pass ? `مسیر خواندن با نشست مدیر ${rows.length} ردیف (حداکثر ۵۰) برگرداند و ردیف آزمایشی با ایمیل مدیر در آن بود` : `ناموفق: ${JSON.stringify(k)} status=${res.status}${j.error ? ` error=${String(j.error)}` : ""}` };
         });
 
+        // ---------- ۳۵) جدول خطای مدیر: ثبت با پاک‌سازی رمز/آدرس، خواندن با مسیر مدیر، RLS ----------
+        await test("۳۵) جدول خطا: خطا ثبت و رمز/آدرس پاک می‌شود؛ فقط مدیر می‌خواند؛ UPDATE ممنوع", async () => {
+          const place = `selftest-err-${stamp}`;
+          await recordError(place, new Error("boom postgres://user:pw123@host:5432/db password=abc123"), { source: "server" });
+          const res = await errorsGET();
+          const j = await getJson(res);
+          const rows = (Array.isArray(j.rows) ? j.rows : []) as Json[];
+          const mine = rows.find((x) => x.place === place);
+          const msg = String(mine?.message ?? "");
+          const q = await pool.query("SELECT has_table_privilege($1, 'public.error_log', 'UPDATE') AS upd, has_table_privilege($1, 'public.error_log', 'SELECT') AS sel", [APP_ROLE]);
+          const k = {
+            status200: res.status === 200,
+            atMost50: rows.length <= 50,
+            hasMyRow: !!mine,
+            urlRedacted: !msg.includes("pw123") && !msg.includes("postgres://"),
+            secretRedacted: !msg.includes("abc123"),
+            appRoleNoUpdate: q.rows[0]?.upd === false && q.rows[0]?.sel === true,
+          };
+          const pass = Object.values(k).every(Boolean);
+          return { pass, detail: pass ? "خطا ثبت شد، آدرس و رمز پاک شد، مسیر مدیر آن را برگرداند و app_runtime اجازه‌ی UPDATE ندارد" : `ناموفق: ${JSON.stringify(k)} status=${res.status}${j.error ? ` error=${String(j.error)}` : ""}` };
+        });
+
         // ---------- ۳۳) RLS و FORCE جدول‌های جدید ----------
         await test("۳۳) جدول‌های audit_log و rate_limits دارای RLS فعال و FORCE هستند", async () => {
           const r = await pool.query("SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS frc FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname IN ('audit_log', 'rate_limits')");
@@ -1399,6 +1423,7 @@ export async function GET(request: NextRequest) {
       // داده‌ی آزمون‌های امنیتی (با اتصال ممتاز؛ نقش app_runtime اجازه‌ی حذف audit_log را ندارد)
       const hasSec = (await pool.query("SELECT to_regclass('public.audit_log') AS a, to_regclass('public.rate_limits') AS r")).rows[0] as Json;
       if (hasSec?.a && (S.auditTargets ?? []).length > 0) await pool.query("DELETE FROM audit_log WHERE target_id = ANY($1::text[])", [S.auditTargets]);
+      if ((await pool.query("SELECT to_regclass('public.error_log') AS e")).rows[0]?.e) await pool.query("DELETE FROM error_log WHERE place LIKE 'selftest-err-%'");
       if (hasSec?.r && (S.rlKeys ?? []).length > 0) await pool.query("DELETE FROM rate_limits WHERE key = ANY($1::text[])", [S.rlKeys]);
       const left = await pool.query(
         `SELECT
@@ -1439,7 +1464,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 10 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 11 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
