@@ -125,6 +125,7 @@ export async function GET(request: NextRequest) {
   const S: { vA?: string; o1?: string; o2?: string; o3?: string; n1?: number; n2?: number; repeat?: string; userB?: string; emailB?: string; vB?: string } = {};
   let counterBefore: number | null | undefined; // undefined = هنوز خوانده نشده
   let setupError: string | null = null;
+  let adminProfileWarning: string | null = null;
   // وضعیت اشتراک اصلیِ پروفایل مدیر (برای آزمون ۹؛ همیشه برگردانده می‌شود)
   type ProfSnap = { status: string; trial_ends_at: Date | null; subscription_ends_at: Date | null };
   // (شیء نگه‌دارنده تا TypeScript مقدار را «همیشه null» فرض نکند)
@@ -222,6 +223,12 @@ export async function GET(request: NextRequest) {
       await c.query("DELETE FROM orders WHERE tenant_id = $1 AND note = $2", [A, NOTE]);
       await c.query("DELETE FROM visitors WHERE tenant_id = $1 AND name LIKE 'SELFTEST-%'", [A]);
     });
+    // فقط خواندن: اگر وضعیت مدیر واقعی trial است ولی اشتراکش در آینده است، فقط هشدار (چیزی تغییر نمی‌کند)
+    const ap = await pool.query("SELECT status, subscription_ends_at FROM profiles WHERE id = $1", [A]);
+    const apRow = ap.rows[0] as Json | undefined;
+    if (apRow && apRow.status === "trial" && apRow.subscription_ends_at && new Date(apRow.subscription_ends_at).getTime() > Date.now()) {
+      adminProfileWarning = "هشدار: وضعیت پروفایل مدیر واقعی «trial» است ولی subscription_ends_at در آینده است (احتمالاً بقایای یک اجرای قطع‌شده‌ی قدیمی). آزمون چیزی را تغییر نداد.";
+    }
     const cb = await pool.query("SELECT last_no FROM order_counters WHERE tenant_id = $1", [A]);
     counterBefore = cb.rows[0] ? Number(cb.rows[0].last_no) : null;
 
@@ -438,40 +445,74 @@ export async function GET(request: NextRequest) {
         return { pass, detail: pass ? `داروخانه‌ی B فقط ${idsB.size} سفارش خودش را می‌بیند و هیچ سفارشی با A مشترک نیست` : `ناموفق: ${JSON.stringify(c)}` };
       });
 
-      // ---------- ۹) مدیر از محدودیت اشتراک معاف است ----------
-      await test("۹) مدیر با اشتراک آزمایشی-منقضی محدود نمی‌شود و بنر نمی‌بیند", async () => {
-        const row = await dbOne("SELECT status, trial_ends_at, subscription_ends_at FROM profiles WHERE id = $1", [A]);
-        P.orig = {
-          status: String(row.status),
-          trial_ends_at: row.trial_ends_at ?? null,
-          subscription_ends_at: row.subscription_ends_at ?? null,
-        };
-        P.restored = false;
+      // ---------- ۹) مدیر از محدودیت اشتراک معاف است (با کاربر مدیر آزمایشی؛ به حساب واقعی مدیر دست نمی‌زند) ----------
+      await test("۹) مدیر آزمایشی با اشتراک منقضی محدود نمی‌شود و بنر نمی‌بیند", async () => {
+        const env9 = (getCloudflareContext() as unknown as { env?: { WORKER_SELF_REFERENCE?: { fetch(r: Request): Promise<Response> } } }).env;
+        const selfRef9 = env9?.WORKER_SELF_REFERENCE;
+        if (!selfRef9) return { pass: false, detail: "WORKER_SELF_REFERENCE در این محیط نیست؛ آزمون اجرا نشد" };
+
+        // کاربر مدیر موقت (selftest-...@invalid.test؛ در پاک‌سازی همراه همه‌ی داده‌هایش حذف می‌شود)
+        const emailT = `selftest-adm-${crypto.randomUUID()}@invalid.test`;
+        const ut = await pool.query(
+          "INSERT INTO users (email, password_hash, role, disabled) VALUES ($1, '!selftest', 'admin', false) RETURNING id",
+          [emailT]
+        );
+        const idT = String(ut.rows[0].id);
+        const colRows9 = await pool.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'profiles'"
+        );
+        const have9 = new Set(colRows9.rows.map((r) => String(r.column_name)));
+        const cols9 = ["id", "owner_user_id", "name", "status", "trial_ends_at"];
+        const vals9 = ["$1", "$1", "$2", "'trial'", "now() - interval '30 days'"];
+        const params9: unknown[] = [idT, "SELFTEST مدیر آزمایشی (موقت)"];
+        if (have9.has("email")) { cols9.push("email"); vals9.push(`$${params9.length + 1}`); params9.push(emailT); }
+        if (have9.has("password_hash")) { cols9.push("password_hash"); vals9.push(`$${params9.length + 1}`); params9.push("!selftest"); }
+        if (have9.has("role")) { cols9.push("role"); vals9.push("'admin'"); }
+        await withTx("admin", idT, (c) => c.query(`INSERT INTO profiles (${cols9.join(", ")}) VALUES (${vals9.join(", ")})`, params9));
+
+        // نشست کاربر مدیر آزمایشی (مثل آزمون ۸): بنر/نقش در APIها
+        const tokT = await signSession({ sub: idT, tid: idT, role: "admin", email: emailT });
+        const getT = async (path: string) =>
+          (await (await selfRef9.fetch(new Request(`${origin}${path}`, { headers: { cookie: `${AUTH_COOKIE}=${tokT}` } }))).json()) as Json;
+        const dash = await getT("/api/dashboard");
+        const lo = await getT("/api/orders");
+        const lc = await getT("/api/cheques");
+        const lv = await getT("/api/visitors");
+
+        // ثبت سفارش با اکشن واقعی زیر نشست مدیر آزمایشی؛ بعد نشست مدیر واقعی برگردانده می‌شود
+        const adminTok9 = request.cookies.get(AUTH_COOKIE)?.value;
+        const adminTid9 = request.cookies.get("pharma_tid")?.value;
+        const store9 = await cookies();
+        const opts9 = { sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30 };
+        let write: { ok: boolean; error?: string } = { ok: false, error: "اجرا نشد" };
         try {
-          await withTx("admin", A, (c) =>
-            c.query("UPDATE profiles SET status = 'trial', trial_ends_at = now() - interval '30 days' WHERE id = $1", [A])
-          );
-          const dash = await dashA();
-          const [lo, lc, lv] = await Promise.all([listA(), getJson(await chequesGET()), getJson(await visitorsGET())]);
-          const write = await createOrderAction({ clientKey: newKey("admin-expired"), visitorId: S.vA as string, note: NOTE, items });
-          const c = {
-            profileReallyExpired: effectiveStatus(dash.profile) === "expired", // شرط آزمون: پروفایل واقعاً منقضی است
-            roleIsAdmin: dash.role === "admin",
-            roleInAllBannerApis: [dash.role, lo.role, lc.role, lv.role].every((x) => x === "admin"),
-            bannerHiddenForAdmin: effectiveStatus(dash.profile, dash.role) === "active",
-            ownerStillRestricted: effectiveStatus(dash.profile, "owner") === "expired",
-            writeAllowed: write.ok === true,
-          };
-          const pass = Object.values(c).every(Boolean);
-          return {
-            pass,
-            detail: pass
-              ? "پروفایل مدیر آزمایشی-منقضی بود ولی ثبت سفارش مجاز ماند و منطق بنر برای مدیر «فعال» است (برای غیرمدیر همچنان منقضی)"
-              : `ناموفق: ${JSON.stringify(c)}${write.ok ? "" : ` خطای ثبت=${write.error}`}`,
-          };
+          store9.set(AUTH_COOKIE, tokT, { ...opts9, httpOnly: true });
+          store9.set("pharma_tid", idT, { ...opts9, httpOnly: false });
+          const vT = await addVisitorAction({ name: `SELFTEST-adm-${stamp}` });
+          write = vT.ok && vT.id
+            ? await createOrderAction({ clientKey: newKey("admin-expired"), visitorId: vT.id, note: NOTE, items })
+            : { ok: false, error: `ساخت ویزیتور: ${vT.error ?? "؟"}` };
         } finally {
-          await restoreProfile();
+          if (adminTok9) store9.set(AUTH_COOKIE, adminTok9, { ...opts9, httpOnly: true });
+          if (adminTid9) store9.set("pharma_tid", adminTid9, { ...opts9, httpOnly: false });
         }
+
+        const c = {
+          profileReallyExpired: effectiveStatus(dash.profile) === "expired", // شرط آزمون: پروفایل آزمایشی واقعاً منقضی است
+          roleIsAdmin: dash.role === "admin",
+          roleInAllBannerApis: [dash.role, lo.role, lc.role, lv.role].every((x) => x === "admin"),
+          bannerHiddenForAdmin: effectiveStatus(dash.profile, dash.role) === "active",
+          ownerStillRestricted: effectiveStatus(dash.profile, "owner") === "expired",
+          writeAllowed: write.ok === true,
+          realAdminSessionKept: !adminTok9 || (await cookies()).get(AUTH_COOKIE)?.value === adminTok9,
+        };
+        const pass = Object.values(c).every(Boolean);
+        return {
+          pass,
+          detail: pass
+            ? "مدیر آزمایشی با پروفایل منقضی: ثبت سفارش مجاز ماند و بنر برای او «فعال» است (برای غیرمدیر همچنان منقضی)؛ پروفایل مدیر واقعی دست نخورد"
+            : `ناموفق: ${JSON.stringify(c)}${write.ok ? "" : ` خطای ثبت=${write.error}`}`,
+        };
       });
 
       // ---------- ۱۰) اسکیمای واقعی دیتابیس با schema.ts ----------
@@ -1074,7 +1115,7 @@ export async function GET(request: NextRequest) {
         pass: leftover === 0 && counterOk && profileOk,
         detail:
           leftover === 0 && counterOk && profileOk
-            ? "همه‌ی داده‌ی آزمایشی پاک شد؛ شمارنده‌ی A و وضعیت اشتراک مدیر به مقدار قبل برگشتند"
+            ? "همه‌ی داده‌ی آزمایشی پاک شد؛ شمارنده‌ی A به مقدار قبل برگشت (پروفایل مدیر واقعی هرگز تغییر داده نمی‌شود)"
             : `باقی‌مانده: ${JSON.stringify(r)} اشتراک‌مدیر‌برگشت=${profileOk} اصل=${JSON.stringify(P.orig)} — پاک‌سازی دستی: DELETE FROM users WHERE email LIKE '${EMAIL_PATTERN}'; DELETE FROM orders WHERE note = '${NOTE}'; DELETE FROM visitors WHERE name LIKE 'SELFTEST-%';`,
       };
     } catch (e) {
@@ -1087,7 +1128,7 @@ export async function GET(request: NextRequest) {
 
   const passed = results.filter((r) => r.pass).length;
   const skipped = results.filter((r) => r.skipped).length;
-  const warnings = results.filter((r) => r.warning).length;
+  const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
   const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
@@ -1100,6 +1141,7 @@ export async function GET(request: NextRequest) {
     skipped,
     warnings,
     stage,
+    ...(adminProfileWarning ? { adminProfileWarning } : {}),
     totalMs: Date.now() - t0All,
     ...(setupError ? { setupError } : {}),
     tests: results,
