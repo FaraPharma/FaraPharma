@@ -15,6 +15,7 @@ import {
 import { adminSetSubscriptionAction, adminToggleAccountAction } from "@/actions/admin";
 import { effectiveStatus, faDate, faNum } from "@/lib/format";
 import { AdminAudit } from "@/components/admin-audit";
+import { AdminErrors } from "@/components/admin-errors";
 
 interface AdminProfile {
   id: string;
@@ -242,6 +243,7 @@ export default function AdminPage() {
       )}
 
       <AdminAudit />
+      <AdminErrors />
     </div>
   );
 }
