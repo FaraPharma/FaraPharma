@@ -958,6 +958,112 @@ async function runtimeGrantsCompletion(c: Queryable): Promise<MigrationResult> {
   return info;
 }
 
+
+/**
+ * مهاجرت امنیتی ۰۱۳ (افزودنی):
+ *  - rate_limits: قفل تلاش بر اساس IP/ایمیل (کلید هش‌شده)؛ RLS با app.rl_keys
+ *  - audit_log: سابقه‌ی عملیات مدیر؛ فقط افزودنی (app_runtime فقط SELECT/INSERT + تریگر رد UPDATE/DELETE)
+ *  - تریگرهای جلوگیری از ارتقای نقش/اشتراک برای نقش‌های غیرممتاز (app_runtime):
+ *      users: INSERT فقط role=owner و فعال؛ هرگز تغییر role به admin؛ تغییر role/disabled فقط با app.role=admin
+ *      profiles: INSERT فقط status=trial بدون اشتراک؛ تغییر status/trial/subscription/owner فقط با app.role=admin
+ *    نقش‌های ممتاز (SUPERUSER/BYPASSRLS مثل postgres در مهاجرت) تحت‌تأثیر نیستند.
+ */
+async function securityHardening(c: Queryable): Promise<MigrationResult> {
+  const adm = `current_setting('app.role', true) = 'admin'`;
+  const keys = `key = ANY (string_to_array(NULLIF(current_setting('app.rl_keys', true), ''), ','))`;
+  await c.query(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      at timestamptz NOT NULL DEFAULT now(),
+      actor_user_id uuid,
+      action text NOT NULL,
+      target_type text,
+      target_id text,
+      detail jsonb
+    );
+    CREATE INDEX IF NOT EXISTS audit_log_at_idx ON audit_log (at DESC);
+    CREATE TABLE IF NOT EXISTS rate_limits (
+      key text PRIMARY KEY,
+      bucket text NOT NULL,
+      count integer NOT NULL DEFAULT 0,
+      window_start timestamptz NOT NULL DEFAULT now(),
+      locked_until timestamptz
+    );
+    CREATE INDEX IF NOT EXISTS rate_limits_window_idx ON rate_limits (window_start);
+
+    ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE audit_log FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS audit_log_admin_select ON audit_log;
+    CREATE POLICY audit_log_admin_select ON audit_log FOR SELECT USING (${adm});
+    DROP POLICY IF EXISTS audit_log_admin_insert ON audit_log;
+    CREATE POLICY audit_log_admin_insert ON audit_log FOR INSERT WITH CHECK (${adm});
+
+    ALTER TABLE rate_limits ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE rate_limits FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS rate_limits_keys_policy ON rate_limits;
+    CREATE POLICY rate_limits_keys_policy ON rate_limits FOR ALL USING (${keys}) WITH CHECK (${keys});
+    DROP POLICY IF EXISTS rate_limits_admin_policy ON rate_limits;
+    CREATE POLICY rate_limits_admin_policy ON rate_limits FOR ALL USING (${adm}) WITH CHECK (${adm});
+
+    REVOKE ALL ON audit_log FROM ${APP_ROLE};
+    REVOKE ALL ON rate_limits FROM ${APP_ROLE};
+    GRANT SELECT, INSERT ON audit_log TO ${APP_ROLE};
+    GRANT SELECT, INSERT, UPDATE, DELETE ON rate_limits TO ${APP_ROLE};
+  `);
+  await c.query(`
+    CREATE OR REPLACE FUNCTION app_audit_log_immutable() RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS $fn$
+    BEGIN
+      IF (SELECT r.rolsuper OR r.rolbypassrls FROM pg_roles r WHERE r.rolname = current_user) THEN RETURN COALESCE(NEW, OLD); END IF;
+      RAISE EXCEPTION 'audit_log is append-only' USING ERRCODE = '42501';
+    END $fn$;
+    DROP TRIGGER IF EXISTS audit_log_no_change ON audit_log;
+    CREATE TRIGGER audit_log_no_change BEFORE UPDATE OR DELETE ON audit_log FOR EACH ROW EXECUTE FUNCTION app_audit_log_immutable();
+
+    CREATE OR REPLACE FUNCTION app_guard_users() RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS $fn$
+    DECLARE priv boolean; adm boolean := coalesce(current_setting('app.role', true), '') = 'admin';
+    BEGIN
+      SELECT r.rolsuper OR r.rolbypassrls INTO priv FROM pg_roles r WHERE r.rolname = current_user;
+      IF priv THEN RETURN NEW; END IF;
+      IF TG_OP = 'INSERT' THEN
+        IF NEW.role IS DISTINCT FROM 'owner' OR coalesce(NEW.disabled, false) THEN
+          RAISE EXCEPTION 'role escalation blocked' USING ERRCODE = '42501';
+        END IF;
+      ELSE
+        IF NEW.role IS DISTINCT FROM OLD.role AND NEW.role = 'admin' THEN
+          RAISE EXCEPTION 'role escalation blocked' USING ERRCODE = '42501';
+        END IF;
+        IF NOT adm AND (NEW.role IS DISTINCT FROM OLD.role OR NEW.disabled IS DISTINCT FROM OLD.disabled) THEN
+          RAISE EXCEPTION 'admin only' USING ERRCODE = '42501';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END $fn$;
+    DROP TRIGGER IF EXISTS users_guard ON users;
+    CREATE TRIGGER users_guard BEFORE INSERT OR UPDATE ON users FOR EACH ROW EXECUTE FUNCTION app_guard_users();
+
+    CREATE OR REPLACE FUNCTION app_guard_profiles() RETURNS trigger LANGUAGE plpgsql SET search_path = public, pg_temp AS $fn$
+    DECLARE priv boolean; adm boolean := coalesce(current_setting('app.role', true), '') = 'admin';
+    BEGIN
+      SELECT r.rolsuper OR r.rolbypassrls INTO priv FROM pg_roles r WHERE r.rolname = current_user;
+      IF priv OR adm THEN RETURN NEW; END IF;
+      IF TG_OP = 'INSERT' THEN
+        IF NEW.status IS DISTINCT FROM 'trial' OR NEW.subscription_ends_at IS NOT NULL THEN
+          RAISE EXCEPTION 'subscription change blocked' USING ERRCODE = '42501';
+        END IF;
+      ELSE
+        IF NEW.status IS DISTINCT FROM OLD.status OR NEW.trial_ends_at IS DISTINCT FROM OLD.trial_ends_at
+           OR NEW.subscription_ends_at IS DISTINCT FROM OLD.subscription_ends_at OR NEW.owner_user_id IS DISTINCT FROM OLD.owner_user_id THEN
+          RAISE EXCEPTION 'subscription change blocked' USING ERRCODE = '42501';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END $fn$;
+    DROP TRIGGER IF EXISTS profiles_guard ON profiles;
+    CREATE TRIGGER profiles_guard BEFORE INSERT OR UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION app_guard_profiles();
+  `);
+  return { tables: "audit_log,rate_limits", triggers: "audit_log_no_change,users_guard,profiles_guard" };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -974,6 +1080,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "010_rls_force_and_auth_policies", up: rlsForcePolicies },
   { name: "011_force_rls_remaining_tenant_tables", up: forceRlsRemainingTenantTables },
   { name: "012_runtime_grants_completion", up: runtimeGrantsCompletion },
+  { name: "013_security_hardening", up: securityHardening },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);

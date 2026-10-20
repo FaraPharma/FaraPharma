@@ -5,6 +5,7 @@ import {
   integer,
   date,
   boolean,
+  jsonb,
   timestamp,
   index,
   uniqueIndex,
@@ -457,3 +458,31 @@ export type PushSubscriptionRow = typeof pushSubscriptions.$inferSelect;
 export type VisitorProductHistory = typeof visitorProductHistory.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/* امنیت: قفل تلاش بر اساس IP/ایمیل و سابقه‌ی عملیات مدیر              */
+/* ------------------------------------------------------------------ */
+
+/** کلید = HMAC(رازِ برنامه، «سطل:شناسه») ؛ IP یا ایمیل خام ذخیره نمی‌شود */
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  bucket: text("bucket").notNull(),
+  count: integer("count").notNull().default(0),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull().defaultNow(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+});
+
+/** فقط افزودنی: نقش app_runtime فقط SELECT و INSERT دارد (و تریگر UPDATE/DELETE را رد می‌کند) */
+export const auditLog = pgTable(
+  "audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    actorUserId: uuid("actor_user_id"),
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    detail: jsonb("detail"),
+  },
+  (t) => [index("audit_log_at_idx").on(t.at)]
+);

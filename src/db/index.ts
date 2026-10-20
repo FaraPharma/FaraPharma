@@ -50,14 +50,15 @@ export async function withTenant<T>(
  *  - email: app.login_email (باید کوچک‌شده و تمیز باشد)
  *  - userId: app.user_id
  *  - tenantId: app.tenant_id (فقط برای ساخت پروفایل تازه در ثبت‌نام)
+ *  - rlKeys: app.rl_keys (کلیدهای هش‌شده‌ی جدول rate_limits؛ فقط همین ردیف‌ها باز می‌شوند)
  */
 export async function withAuthCtx<T>(
-  ctx: { email?: string; userId?: string; tenantId?: string },
+  ctx: { email?: string; userId?: string; tenantId?: string; rlKeys?: string[] },
   fn: (tx: Tx) => Promise<T>
 ): Promise<T> {
   return db.transaction(async (tx) => {
     await tx.execute(
-      sql`SELECT set_config('app.login_email', ${ctx.email ?? ""}, true), set_config('app.user_id', ${ctx.userId ?? ""}, true), set_config('app.tenant_id', ${ctx.tenantId ?? ""}, true)`
+      sql`SELECT set_config('app.login_email', ${ctx.email ?? ""}, true), set_config('app.user_id', ${ctx.userId ?? ""}, true), set_config('app.tenant_id', ${ctx.tenantId ?? ""}, true), set_config('app.rl_keys', ${(ctx.rlKeys ?? []).join(",")}, true)`
     );
     return fn(tx);
   });
