@@ -8,7 +8,10 @@ import { ensureDb } from "@/db/bootstrap";
 import { diffSchema } from "@/db/schema-check";
 import { APP_ROLE, listPendingMigrations, runMigrations } from "@/db/migrations";
 import { pool as appPool } from "@/db/pool";
-import { registerAction } from "@/actions/auth";
+import { registerAction, updateProfileAction } from "@/actions/auth";
+import { adminSetSubscriptionAction, adminToggleAccountAction } from "@/actions/admin";
+import { checkIpLock, recordIpAttempt, rateLimitKey, ipLockMessage, IP_RULES, type IpBucket } from "@/lib/rate-limit";
+import { normalizeIp } from "@/lib/client-ip";
 import { effectiveStatus } from "@/lib/format";
 import { addVisitorAction, deleteVisitorAction } from "@/actions/visitors";
 import {
@@ -106,9 +109,9 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۳۲)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
-  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" ? stageParam : "all";
+  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" ? stageParam : "all";
   const t0All = Date.now();
 
   const pool = new Pool({
@@ -122,7 +125,7 @@ export async function GET(request: NextRequest) {
   pool.on("error", () => undefined);
 
   const results: Row[] = [];
-  const S: { vA?: string; o1?: string; o2?: string; o3?: string; n1?: number; n2?: number; repeat?: string; userB?: string; emailB?: string; vB?: string } = {};
+  const S: { rlKeys?: string[]; auditTargets?: string[]; vA?: string; o1?: string; o2?: string; o3?: string; n1?: number; n2?: number; repeat?: string; userB?: string; emailB?: string; vB?: string } = {};
   let counterBefore: number | null | undefined; // undefined = هنوز خوانده نشده
   let setupError: string | null = null;
   let adminProfileWarning: string | null = null;
@@ -219,6 +222,19 @@ export async function GET(request: NextRequest) {
   try {
     // ---------- آماده‌سازی ----------
     await pool.query("DELETE FROM users WHERE email LIKE $1", [EMAIL_PATTERN]); // بقایای اجرای نیمه‌کاره‌ی قبلی
+    // شمارنده‌های قفل IP خودِ اجراکننده پاک می‌شود تا ثبت‌نام آزمایشیِ آزمون ۱۱ (که از IP واقعی می‌رود) قفل نشود
+    S.rlKeys = [];
+    S.auditTargets = [];
+    try {
+      const myIp = normalizeIp(request.headers.get("cf-connecting-ip") ?? "");
+      if (myIp && (await pool.query("SELECT to_regclass('public.rate_limits') AS t")).rows[0]?.t) {
+        const mine = [await rateLimitKey("login-fail", myIp), await rateLimitKey("register", myIp)];
+        await pool.query("DELETE FROM rate_limits WHERE key = ANY($1::text[])", [mine]);
+        S.rlKeys.push(...mine);
+      }
+    } catch {
+      /* آزمون‌های قدیمی نباید به این وابسته باشند */
+    }
     await withTx("admin", A, async (c) => {
       await c.query("DELETE FROM orders WHERE tenant_id = $1 AND note = $2", [A, NOTE]);
       await c.query("DELETE FROM visitors WHERE tenant_id = $1 AND name LIKE 'SELFTEST-%'", [A]);
@@ -1078,6 +1094,266 @@ export async function GET(request: NextRequest) {
           return { pass: bad.length === 0, detail: bad.length === 0 ? `${pagePaths.length} صفحه بدون خطای ۴xx/۵xx` : `${bad.length} صفحه خطا: ${bad.join(" ‖ ")}` };
         });
       }
+
+      // ================= آزمون‌های امنیتی (stage=sec) =================
+      if (stage === "sec") {
+        const errCode = (e: unknown) => String((e as { code?: string }).code ?? "ERR");
+        const testIp = () => `203.0.113.${Math.floor(Math.random() * 250) + 1}`; // محدوده‌ی مستندسازی؛ هرگز IP واقعی کاربر نیست
+        const trackKey = async (b: IpBucket, ip: string) => {
+          S.rlKeys!.push(await rateLimitKey(b, ip));
+        };
+        const tenantB = S.userB as string;
+
+        // ---------- ۲۶) قفل ورود بر اساس IP ----------
+        await test("۲۶) ۱۱ ورود ناموفق پشت‌سرهم از یک IP قفل می‌شود (IP دیگر آزاد می‌ماند)", async () => {
+          const ip = testIp();
+          const other = `203.0.114.${Math.floor(Math.random() * 250) + 1}`;
+          await trackKey("login-fail", ip);
+          let lockedAtAttempt = 0;
+          let tenthLocked = false;
+          let msg = "";
+          for (let i = 1; i <= 11; i++) {
+            const c = await checkIpLock("login-fail", ip);
+            if (c.locked) {
+              lockedAtAttempt = i;
+              msg = ipLockMessage(c.retryAfterMin ?? 0);
+              break;
+            }
+            const r = await recordIpAttempt("login-fail", ip);
+            if (i === IP_RULES["login-fail"].max) tenthLocked = r.locked;
+          }
+          const otherFree = !(await checkIpLock("login-fail", other)).locked;
+          const raw = await pool.query("SELECT count(*)::int AS n FROM rate_limits WHERE key = $1 OR key = $2", [ip, `login-fail:${ip}`]);
+          const k = {
+            locksAt11: lockedAtAttempt === 11,
+            tenthFailureLocks: tenthLocked,
+            messageHasMinutes: /\d+ دقیقه/.test(msg),
+            otherIpFree: otherFree,
+            rawIpNotStored: raw.rows[0].n === 0,
+          };
+          const pass = Object.values(k).every(Boolean);
+          return { pass, detail: pass ? `ده شکست قفل را فعال کرد و تلاش ۱۱ رد شد؛ «${msg}»؛ IP دیگر آزاد؛ IP خام ذخیره نمی‌شود (IP آزمایشی، نه IP واقعی)` : `ناموفق: ${JSON.stringify(k)}` };
+        });
+
+        // ---------- ۲۷) باز شدن قفل بعد از زمان مقرر ----------
+        await test("۲۷) قفل IP بعد از ۱۵ دقیقه باز می‌شود و شمارنده از نو شروع می‌شود", async () => {
+          const ip = testIp();
+          await trackKey("login-fail", ip);
+          const t0 = Date.now();
+          for (let i = 0; i < IP_RULES["login-fail"].max; i++) await recordIpAttempt("login-fail", ip, t0);
+          const at14 = await checkIpLock("login-fail", ip, t0 + 14 * 60_000);
+          const at16 = await checkIpLock("login-fail", ip, t0 + 16 * 60_000);
+          const after = await recordIpAttempt("login-fail", ip, t0 + 16 * 60_000);
+          const row = await pool.query("SELECT count FROM rate_limits WHERE key = $1", [await rateLimitKey("login-fail", ip)]);
+          const k = { lockedAt14min: at14.locked, openAt16min: !at16.locked, newAttemptNotLocked: !after.locked, counterRestarted: row.rows[0]?.count === 1 };
+          const pass = Object.values(k).every(Boolean);
+          return { pass, detail: pass ? "بعد از ۱۴ دقیقه هنوز قفل بود؛ بعد از ۱۶ دقیقه باز شد و شمارنده دوباره از ۱ شروع شد (زمان شبیه‌سازی شد)" : `ناموفق: ${JSON.stringify(k)}` };
+        });
+
+        // ---------- ۲۸) قفل ثبت‌نام بر اساس IP ----------
+        await test("۲۸) تلاش بیش از سقف ثبت‌نام از یک IP رد می‌شود", async () => {
+          const ip = testIp();
+          await trackKey("register", ip);
+          const max = IP_RULES.register.max;
+          let blockedAt = 0;
+          for (let i = 1; i <= max + 1; i++) {
+            const c = await checkIpLock("register", ip);
+            if (c.locked) { blockedAt = i; break; }
+            await recordIpAttempt("register", ip);
+          }
+          const pass = blockedAt === max + 1;
+          return { pass, detail: pass ? `${max} تلاش ثبت‌نام مجاز بود و تلاش ${max + 1} رد شد` : `ناموفق: رد شدن در تلاش ${blockedAt || "هیچ"} (انتظار ${max + 1})` };
+        });
+
+        // ---------- ۲۹) ارتقای نقش/اشتراک از طریق اکشن‌ها ----------
+        await test("۲۹) اکشن‌ها نمی‌گذارند صاحب داروخانه نقش یا اشتراک را تغییر دهد", async () => {
+          const adminTok = request.cookies.get(AUTH_COOKIE)?.value;
+          const adminTid = request.cookies.get("pharma_tid")?.value;
+          const store = await cookies();
+          const opts = { sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30 };
+          const before = await dbOne("SELECT p.status, p.subscription_ends_at, p.trial_ends_at, u.role, u.disabled FROM profiles p JOIN users u ON u.id = p.owner_user_id WHERE p.id = $1", [tenantB]);
+          const tokB = await signSession({ sub: tenantB, tid: tenantB, role: "owner", email: S.emailB as string });
+          const res: Record<string, string> = {};
+          try {
+            store.set(AUTH_COOKIE, tokB, { ...opts, httpOnly: true });
+            store.set("pharma_tid", tenantB, { ...opts, httpOnly: false });
+            // الف) اکشن واقعی پروفایل با فیلدهای اضافی دستکاری‌شده
+            const r1 = await updateProfileAction({ name: "SELFTEST تغییر نام", phone: "0", role: "admin", status: "expired", subscriptionEndsAt: "2099-01-01", trialEndsAt: "2099-01-01" } as never);
+            res.profileUpdate = r1.ok ? "ok" : `ok=false`;
+            // ب) اکشن‌های مخصوص مدیر با نشست صاحب داروخانه
+            try {
+              const r2 = await adminSetSubscriptionAction({ profileId: tenantB, status: "active", endDate: "2099-12-31" });
+              res.adminSub = r2.ok ? "اجرا شد!" : "رد شد";
+            } catch { res.adminSub = "رد شد"; }
+            try {
+              const r3 = await adminToggleAccountAction({ userId: tenantB, disabled: true });
+              res.adminToggle = r3.ok ? "اجرا شد!" : "رد شد";
+            } catch { res.adminToggle = "رد شد"; }
+          } finally {
+            if (adminTok) store.set(AUTH_COOKIE, adminTok, { ...opts, httpOnly: true });
+            if (adminTid) store.set("pharma_tid", adminTid, { ...opts, httpOnly: false });
+          }
+          const after = await dbOne("SELECT p.status, p.subscription_ends_at, p.trial_ends_at, u.role, u.disabled FROM profiles p JOIN users u ON u.id = p.owner_user_id WHERE p.id = $1", [tenantB]);
+          const same = (a: Json, b: Json) => JSON.stringify(a) === JSON.stringify(b);
+          const k = {
+            adminSubRejected: res.adminSub === "رد شد",
+            adminToggleRejected: res.adminToggle === "رد شد",
+            statusUnchanged: after.status === before.status,
+            subscriptionUnchanged: same(after.subscription_ends_at, before.subscription_ends_at) && same(after.trial_ends_at, before.trial_ends_at),
+            roleUnchanged: after.role === before.role && after.role === "owner",
+            disabledUnchanged: after.disabled === before.disabled,
+          };
+          const pass = Object.values(k).every(Boolean);
+          return { pass, detail: pass ? `اکشن پروفایل فقط نام/تلفن را تغییر داد (فیلدهای role/status/اشتراک نادیده شد)؛ دو اکشن مدیر با نشست صاحب داروخانه رد شد؛ نشست مدیر برگشت` : `ناموفق: ${JSON.stringify(k)} ${JSON.stringify(res)}` };
+        });
+
+        // ---------- اتصال جدا به app_runtime برای آزمون‌های ۳۰ و ۳۲ ----------
+        const rtPw = process.env.APP_RUNTIME_PASSWORD;
+        let rt3: Client | null = null;
+        let rt3Why = "";
+        try {
+          const appU = new URL(appUrl);
+          let connStr: string | null = null;
+          if (decodeURIComponent(appU.username).startsWith(APP_ROLE)) connStr = appUrl;
+          else if (rtPw) {
+            const base = new URL(url);
+            const bu = decodeURIComponent(base.username);
+            const dot = bu.indexOf(".");
+            const u3 = new URL(base.toString());
+            u3.username = encodeURIComponent(APP_ROLE + (dot >= 0 ? bu.slice(dot) : ""));
+            u3.password = encodeURIComponent(rtPw);
+            connStr = u3.toString();
+          } else rt3Why = "APP_RUNTIME_PASSWORD تنظیم نشده";
+          if (connStr) {
+            let cl: Client | null = null;
+            let lastErr: unknown;
+            for (let i = 0; i < 3 && !cl; i++) {
+              const c = new Client({ connectionString: connStr, connectionTimeoutMillis: 15_000, query_timeout: 15_000, statement_timeout: 15_000 });
+              c.on("error", () => undefined);
+              try { await c.connect(); cl = c; } catch (e) { lastErr = e; await c.end().catch(() => undefined); if (i < 2) await new Promise((r) => setTimeout(r, 1500)); }
+            }
+            if (!cl) throw lastErr;
+            rt3 = cl;
+          }
+        } catch (e) {
+          rt3Why = `اتصال app_runtime ناموفق: ${rtPw ? errMsg(e).split(rtPw).join("***") : errMsg(e)}`;
+        }
+        try {
+          const rtTest3 = async (name: string, fn: (c: Client) => Promise<{ pass: boolean; detail: string }>) => {
+            if (!rt3) {
+              results.push({ name, pass: false, skipped: true, detail: `اجرا نشد: ${rt3Why}` });
+              return;
+            }
+            const c = rt3;
+            await test(name, async () => {
+              await c.query("BEGIN");
+              try { return await fn(c); } finally { await c.query("ROLLBACK").catch(() => undefined); }
+            });
+          };
+          const guc3 = (c: Client, o: { tenant?: string; role?: string; user?: string; email?: string }) =>
+            c.query("SELECT set_config('app.tenant_id', $1, true), set_config('app.role', $2, true), set_config('app.user_id', $3, true), set_config('app.login_email', $4, true)", [o.tenant ?? "", o.role ?? "", o.user ?? "", o.email ?? ""]);
+          // اجرای یک دستور داخل savepoint؛ کد خطا یا تعداد ردیف تغییرکرده را برمی‌گرداند
+          const attempt = async (c: Client, q: string, params: unknown[] = []): Promise<{ code: string | null; rows: number | null }> => {
+            await c.query("SAVEPOINT a1");
+            try {
+              const r = await c.query(q, params);
+              return { code: null, rows: r.rowCount };
+            } catch (e) {
+              return { code: errCode(e), rows: null };
+            } finally {
+              await c.query("ROLLBACK TO SAVEPOINT a1").catch(() => undefined);
+            }
+          };
+
+          // ---------- ۳۰) ارتقای نقش مستقیم با نقش app_runtime ----------
+          await rtTest3("۳۰) نقش app_runtime مستقیم هم نمی‌تواند role یا اشتراک را ارتقا دهد", async (c) => {
+            const ne = `selftest-esc-${crypto.randomUUID()}@invalid.test`;
+            const nu = crypto.randomUUID();
+            await guc3(c, { email: ne, user: nu, tenant: nu });
+            const insAdmin = await attempt(c, "INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, '!x', 'admin')", [nu, ne]);
+            const insOwner = await attempt(c, "WITH u AS (INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, '!x', 'owner') RETURNING id) INSERT INTO profiles (id, owner_user_id, name, status, trial_ends_at) SELECT id, id, 'x', 'trial', now() + interval '7 days' FROM u", [nu, ne]);
+            const insActive = await attempt(c, "WITH u AS (INSERT INTO users (id, email, password_hash, role) VALUES ($1, $2, '!x', 'owner') RETURNING id) INSERT INTO profiles (id, owner_user_id, name, status, subscription_ends_at) SELECT id, id, 'x', 'active', now() + interval '1 year' FROM u", [nu, ne]);
+            await guc3(c, { tenant: S.userB as string, role: "admin", user: S.userB as string });
+            const toAdmin = await attempt(c, "UPDATE users SET role = 'admin' WHERE id = $1", [S.userB]);
+            const adminDisable = await attempt(c, "UPDATE users SET disabled = true WHERE id = $1", [S.userB]);
+            const adminSub = await attempt(c, "UPDATE profiles SET subscription_ends_at = now() + interval '30 days' WHERE id = $1", [S.userB]);
+            await guc3(c, { tenant: S.userB as string, role: "owner", user: S.userB as string });
+            const ownSub = await attempt(c, "UPDATE profiles SET subscription_ends_at = now() + interval '10 years' WHERE id = $1", [S.userB]);
+            const ownStatus = await attempt(c, "UPDATE profiles SET status = 'expired' WHERE id = $1", [S.userB]);
+            const ownName = await attempt(c, "UPDATE profiles SET name = name WHERE id = $1", [S.userB]);
+            const ownRole = await attempt(c, "UPDATE users SET role = 'admin' WHERE id = $1", [S.userB]);
+            const k = {
+              insertAdminBlocked: insAdmin.code === "42501",
+              registerOwnerAllowed: insOwner.code === null,
+              registerActiveBlocked: insActive.code === "42501",
+              roleToAdminBlockedEvenForAdminGuc: toAdmin.code === "42501",
+              adminCanDisable: adminDisable.code === null && adminDisable.rows === 1,
+              adminCanSetSubscription: adminSub.code === null && adminSub.rows === 1,
+              ownerSubscriptionBlocked: ownSub.code === "42501",
+              ownerStatusBlocked: ownStatus.code === "42501",
+              ownerNameAllowed: ownName.code === null && ownName.rows === 1,
+              ownerCannotTouchUsers: ownRole.code !== null || ownRole.rows === 0,
+            };
+            const pass = Object.values(k).every(Boolean);
+            return { pass, detail: pass ? "ساخت مدیر، ارتقای role و تغییر اشتراک توسط app_runtime رد شد؛ عملیات مجاز (ثبت‌نام owner، تغییر نام، عملیات مدیر غیر از ارتقا) کار کرد" : `ناموفق: ${JSON.stringify(k)} ${JSON.stringify({ insAdmin, insOwner, insActive, toAdmin, ownSub, ownStatus })}` };
+          });
+
+          // ---------- ۳۲) audit_log فقط افزودنی ----------
+          await rtTest3("۳۲) audit_log با app_runtime قابل UPDATE و DELETE نیست", async (c) => {
+            await guc3(c, { tenant: A, role: "admin", user: A });
+            const insAdmin = await attempt(c, "INSERT INTO audit_log (actor_user_id, action) VALUES ($1, 'selftest.append')", [A]);
+            await guc3(c, { tenant: tenantB, role: "owner", user: tenantB });
+            const insOwner = await attempt(c, "INSERT INTO audit_log (actor_user_id, action) VALUES ($1, 'selftest.fake')", [tenantB]);
+            const selOwner = await attempt(c, "SELECT * FROM audit_log");
+            await guc3(c, { tenant: A, role: "admin", user: A });
+            const upd = await attempt(c, "UPDATE audit_log SET action = 'x'");
+            const del = await attempt(c, "DELETE FROM audit_log");
+            const priv = await pool.query("SELECT has_table_privilege($1, 'public.audit_log', 'UPDATE') AS u, has_table_privilege($1, 'public.audit_log', 'DELETE') AS d, has_table_privilege($1, 'public.audit_log', 'TRUNCATE') AS tr, (SELECT count(*)::int FROM pg_trigger WHERE tgname = 'audit_log_no_change') AS t", [APP_ROLE]);
+            const k = {
+              adminAppendAllowed: insAdmin.code === null,
+              ownerInsertBlocked: insOwner.code === "42501",
+              ownerReadsNothing: selOwner.code === null && selOwner.rows === 0,
+              updateDenied: upd.code === "42501",
+              deleteDenied: del.code === "42501",
+              noUpdateDeleteTruncateGrant: priv.rows[0].u === false && priv.rows[0].d === false && priv.rows[0].tr === false,
+              immutableTriggerPresent: priv.rows[0].t === 1,
+            };
+            const pass = Object.values(k).every(Boolean);
+            return { pass, detail: pass ? "فقط مدیر می‌تواند ثبت کند؛ UPDATE/DELETE با 42501 رد شد و دسترسی UPDATE/DELETE/TRUNCATE وجود ندارد؛ تریگر ضدتغییر برقرار است" : `ناموفق: ${JSON.stringify(k)}` };
+          });
+        } finally {
+          if (rt3) await (rt3 as Client).end().catch(() => undefined);
+        }
+
+        // ---------- ۳۱) ثبت audit برای عملیات واقعی مدیر ----------
+        await test("۳۱) عملیات مدیر در audit_log ثبت می‌شود (کی، چه، روی چه، کی)", async () => {
+          S.auditTargets!.push(tenantB);
+          const r1 = await adminSetSubscriptionAction({ profileId: tenantB, status: "active", endDate: "2099-12-31" });
+          const r2 = await adminToggleAccountAction({ userId: tenantB, disabled: true });
+          const r3 = await adminToggleAccountAction({ userId: tenantB, disabled: false });
+          const rows = await pool.query("SELECT action, target_type, target_id, actor_user_id, at, detail FROM audit_log WHERE target_id = $1 ORDER BY at", [tenantB]);
+          const actions = rows.rows.map((r) => String(r.action));
+          const k = {
+            actionsOk: r1.ok && r2.ok && r3.ok,
+            hasSubscription: actions.includes("subscription.set"),
+            hasDisable: actions.includes("account.disable"),
+            hasEnable: actions.includes("account.enable"),
+            actorIsRealAdmin: rows.rows.length > 0 && rows.rows.every((r) => r.actor_user_id === admin.userId),
+            hasTimeAndTarget: rows.rows.every((r) => r.at && r.target_type && r.target_id),
+            detailHasStatus: rows.rows.find((r) => r.action === "subscription.set")?.detail?.status === "active",
+          };
+          const pass = Object.values(k).every(Boolean);
+          return { pass, detail: pass ? `${rows.rows.length} ردیف audit با مدیر، عمل، هدف و زمان ثبت شد (روی داروخانه‌ی آزمایشی؛ حساب واقعی مدیر دست نخورد)` : `ناموفق: ${JSON.stringify(k)} actions=${actions.join(",")}` };
+        });
+
+        // ---------- ۳۳) RLS و FORCE جدول‌های جدید ----------
+        await test("۳۳) جدول‌های audit_log و rate_limits دارای RLS فعال و FORCE هستند", async () => {
+          const r = await pool.query("SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS frc FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname IN ('audit_log', 'rate_limits')");
+          const bad = r.rows.filter((x) => !x.rls || !x.frc).map((x) => String(x.relname));
+          const pass = r.rows.length === 2 && bad.length === 0;
+          return { pass, detail: pass ? "هر دو جدول RLS و FORCE دارند" : `ناموفق: پیدا شد=${r.rows.length} ناقص=[${bad.join("،")}] — ابتدا مهاجرت را اجرا کنید` };
+        });
+      }
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -1091,6 +1367,10 @@ export async function GET(request: NextRequest) {
         else if (typeof counterBefore === "number") await c.query("UPDATE order_counters SET last_no = $2 WHERE tenant_id = $1", [A, counterBefore]);
       });
       await pool.query("DELETE FROM users WHERE email LIKE $1", [EMAIL_PATTERN]);
+      // داده‌ی آزمون‌های امنیتی (با اتصال ممتاز؛ نقش app_runtime اجازه‌ی حذف audit_log را ندارد)
+      const hasSec = (await pool.query("SELECT to_regclass('public.audit_log') AS a, to_regclass('public.rate_limits') AS r")).rows[0] as Json;
+      if (hasSec?.a && (S.auditTargets ?? []).length > 0) await pool.query("DELETE FROM audit_log WHERE target_id = ANY($1::text[])", [S.auditTargets]);
+      if (hasSec?.r && (S.rlKeys ?? []).length > 0) await pool.query("DELETE FROM rate_limits WHERE key = ANY($1::text[])", [S.rlKeys]);
       const left = await pool.query(
         `SELECT
            (SELECT count(*)::int FROM users WHERE email LIKE $1) AS users,
@@ -1130,7 +1410,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 9 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
