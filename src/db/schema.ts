@@ -486,3 +486,19 @@ export const auditLog = pgTable(
   },
   (t) => [index("audit_log_at_idx").on(t.at)]
 );
+
+/** خطاهای سرور/کلاینت برای مدیر؛ فقط پیام کوتاهِ پاک‌سازی‌شده (بدون رمز، کلید، آدرس اتصال) */
+export const errorLog = pgTable(
+  "error_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    source: text("source").notNull(),
+    place: text("place").notNull(),
+    code: text("code"),
+    message: text("message").notNull(),
+    tenantId: uuid("tenant_id"),
+    userId: uuid("user_id"),
+  },
+  (t) => [index("error_log_at_idx").on(t.at)]
+);

@@ -1064,6 +1064,38 @@ async function securityHardening(c: Queryable): Promise<MigrationResult> {
   return { tables: "audit_log,rate_limits", triggers: "audit_log_no_change,users_guard,profiles_guard" };
 }
 
+/**
+ * مهاجرت ۰۱۴ (افزودنی): error_log برای جدول خطای مدیر.
+ * app_runtime: INSERT برای همه‌ی نشست‌ها؛ SELECT و DELETE فقط با app.role=admin (RLS)؛ بدون UPDATE.
+ */
+async function errorLogTable(c: Queryable): Promise<MigrationResult> {
+  const adm = `current_setting('app.role', true) = 'admin'`;
+  await c.query(`
+    CREATE TABLE IF NOT EXISTS error_log (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      at timestamptz NOT NULL DEFAULT now(),
+      source text NOT NULL,
+      place text NOT NULL,
+      code text,
+      message text NOT NULL,
+      tenant_id uuid,
+      user_id uuid
+    );
+    CREATE INDEX IF NOT EXISTS error_log_at_idx ON error_log (at DESC);
+    ALTER TABLE error_log ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE error_log FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS error_log_insert ON error_log;
+    CREATE POLICY error_log_insert ON error_log FOR INSERT WITH CHECK (true);
+    DROP POLICY IF EXISTS error_log_admin_select ON error_log;
+    CREATE POLICY error_log_admin_select ON error_log FOR SELECT USING (${adm});
+    DROP POLICY IF EXISTS error_log_admin_delete ON error_log;
+    CREATE POLICY error_log_admin_delete ON error_log FOR DELETE USING (${adm});
+    REVOKE ALL ON error_log FROM ${APP_ROLE};
+    GRANT SELECT, INSERT, DELETE ON error_log TO ${APP_ROLE};
+  `);
+  return { tables: "error_log" };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -1081,6 +1113,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "011_force_rls_remaining_tenant_tables", up: forceRlsRemainingTenantTables },
   { name: "012_runtime_grants_completion", up: runtimeGrantsCompletion },
   { name: "013_security_hardening", up: securityHardening },
+  { name: "014_error_log", up: errorLogTable },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);
