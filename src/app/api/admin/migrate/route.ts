@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { runMigrations } from "@/db/migrations";
+import { withTenant } from "@/db";
+import { writeAudit } from "@/lib/audit";
 
 /**
  * اجرای مهاجرت‌های دیتابیس — فقط مدیر (برای بقیه 404).
@@ -22,6 +24,19 @@ async function guard(): Promise<NextResponse | null> {
 
 async function run() {
   const report = await runMigrations();
+  // سابقه‌ی عملیات مدیر (اگر جدول audit_log هنوز نباشد، مهم نیست)
+  try {
+    const ctx = await requireAdmin();
+    await withTenant(ctx, (tx) =>
+      writeAudit(tx, ctx.userId, {
+        action: "migrations.run",
+        targetType: "database",
+        detail: { ok: report.ok, applied: report.applied.map((a) => a.name), failed: report.failed?.name ?? null },
+      })
+    );
+  } catch {
+    /* ignore */
+  }
   return NextResponse.json(report, { status: report.ok ? 200 : 500 });
 }
 
