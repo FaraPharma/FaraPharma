@@ -25,11 +25,41 @@ const globalForDb = globalThis as typeof globalThis & {
 const perRequest = new WeakMap<object, Pool>();
 let warnedNoContext = false;
 
+/**
+ * کلید مرکزی: true = برنامه با نقش app_runtime (بدون دسترسی ممتاز، با RLS واقعی) وصل می‌شود.
+ * برای برگشت فوری به اتصال قبلی فقط این را false کنید و فایل را دوباره بگذارید.
+ */
+const USE_APP_RUNTIME_ROLE = true;
+
+/**
+ * آدرس اتصال برنامه را از DATABASE_URL فعلی و APP_RUNTIME_PASSWORD می‌سازد:
+ * نام کاربری postgres.<ref> به app_runtime.<ref> تبدیل می‌شود و رمز از متغیر محیطی می‌آید.
+ * اگر متغیر نبود یا آدرس از قبل app_runtime بود، همان آدرس بدون تغییر برمی‌گردد.
+ */
+function runtimeConnectionString(base: string): string {
+  if (!USE_APP_RUNTIME_ROLE) return base;
+  const password = process.env.APP_RUNTIME_PASSWORD;
+  if (!password) return base;
+  try {
+    const u = new URL(base);
+    const user = decodeURIComponent(u.username);
+    if (user.startsWith("app_runtime")) return base;
+    const dot = user.indexOf(".");
+    if (dot < 0) return base; // قالب نام کاربری ناشناخته: دست نزن
+    u.username = `app_runtime${user.slice(dot)}`;
+    u.password = password;
+    return u.toString();
+  } catch {
+    return base;
+  }
+}
+
 function createPool(): Pool {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
+  const base = process.env.DATABASE_URL;
+  if (!base) {
     throw new Error("DATABASE_URL تنظیم نشده است");
   }
+  const connectionString = runtimeConnectionString(base);
   // ssl: فقط از خود connection string خوانده می‌شود (بدون rejectUnauthorized:false)
   const p = new Pool({ connectionString, ...POOL_OPTIONS });
   p.on("error", (e) => console.error("[db] pool error:", e.message));
