@@ -1,5 +1,6 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { eq } from "drizzle-orm";
+import { withSystemRole } from "@/db";
+import { catalogBlobs } from "@/db/schema";
 import { AwsClient } from "aws4fetch";
 
 /**
@@ -10,7 +11,8 @@ import { AwsClient } from "aws4fetch";
  * Backends:
  *  - S3-compatible (MinIO/R2/Backblaze/…) when S3_ENDPOINT, S3_BUCKET,
  *    S3_ACCESS_KEY and S3_SECRET_KEY are configured (signed via aws4fetch).
- *  - Local filesystem under ./storage otherwise (dev / self-hosted).
+ *  - جدول catalog_blobs در دیتابیس otherwise (روی Workers دیسک ماندگار نیست).
+ *    دسترسی فقط با نقش سیستم؛ مسیر دانلود قبلش مالکیت tenant را بررسی می‌کند.
  */
 
 const S3_CONFIGURED =
@@ -18,8 +20,6 @@ const S3_CONFIGURED =
   !!process.env.S3_BUCKET &&
   !!process.env.S3_ACCESS_KEY &&
   !!process.env.S3_SECRET_KEY;
-
-const LOCAL_ROOT = path.join(process.cwd(), "storage");
 
 let s3: AwsClient | null = null;
 
@@ -56,9 +56,9 @@ export const storage: StorageAdapter = {
       if (!res.ok) throw new Error(`S3 put failed: ${res.status}`);
       return;
     }
-    const full = path.join(LOCAL_ROOT, key);
-    await fs.mkdir(path.dirname(full), { recursive: true });
-    await fs.writeFile(full, body);
+    await withSystemRole((tx) =>
+      tx.insert(catalogBlobs).values({ fileKey: key, data: body }).onConflictDoUpdate({ target: catalogBlobs.fileKey, set: { data: body } })
+    );
   },
 
   async get(key) {
@@ -67,11 +67,7 @@ export const storage: StorageAdapter = {
       if (!res.ok) return null;
       return new Uint8Array(await res.arrayBuffer());
     }
-    try {
-      const buf = await fs.readFile(path.join(LOCAL_ROOT, key));
-      return new Uint8Array(buf);
-    } catch {
-      return null;
-    }
+    const rows = await withSystemRole((tx) => tx.select({ data: catalogBlobs.data }).from(catalogBlobs).where(eq(catalogBlobs.fileKey, key)).limit(1));
+    return rows[0]?.data ?? null;
   },
 };
