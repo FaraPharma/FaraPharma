@@ -311,6 +311,7 @@ export const quickNotes = pgTable(
       .notNull()
       .references(() => profiles.id, { onDelete: "cascade" }),
     body: text("body").notNull(),
+    clientKey: text("client_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

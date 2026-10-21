@@ -1096,6 +1096,15 @@ async function errorLogTable(c: Queryable): Promise<MigrationResult> {
   return { tables: "error_log" };
 }
 
+/** مهاجرت ۰۱۵ (افزودنی): کلید یکتای همگام‌سازی یادداشت‌های آفلاین (جلوگیری از ثبت تکراری) */
+async function quickNotesClientKey(c: Queryable): Promise<MigrationResult> {
+  await c.query(`
+    ALTER TABLE quick_notes ADD COLUMN IF NOT EXISTS client_key text;
+    CREATE UNIQUE INDEX IF NOT EXISTS quick_notes_client_key_uq ON quick_notes (tenant_id, client_key) WHERE client_key IS NOT NULL;
+  `);
+  return { columns: "quick_notes.client_key" };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -1114,6 +1123,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "012_runtime_grants_completion", up: runtimeGrantsCompletion },
   { name: "013_security_hardening", up: securityHardening },
   { name: "014_error_log", up: errorLogTable },
+  { name: "015_quick_notes_client_key", up: quickNotesClientKey },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);
