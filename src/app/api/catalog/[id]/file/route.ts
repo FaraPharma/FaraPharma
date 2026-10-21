@@ -26,6 +26,7 @@ export async function GET(
           id: catalogFiles.id,
           fileName: catalogFiles.fileName,
           fileKey: catalogFiles.fileKey,
+          mimeType: catalogFiles.mimeType,
         })
         .from(catalogFiles)
         .where(
@@ -43,13 +44,13 @@ export async function GET(
     const buf = await storage.get(row.fileKey);
     if (!buf) {
       return NextResponse.json(
-        { error: "فایل در مخزن موجود نیست" },
+        { error: "این فایل ذخیره نشده بود؛ لطفاً دوباره بارگذاری کنید" },
         { status: 404 }
       );
     }
     return new NextResponse(new Uint8Array(buf), {
       headers: {
-        "content-type": "application/pdf",
+        "content-type": /^[a-z]+\/[a-z0-9.+-]+$/i.test(row.mimeType) ? row.mimeType : "application/octet-stream",
         "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(row.fileName)}`,
         "cache-control": "private, no-store",
       },
