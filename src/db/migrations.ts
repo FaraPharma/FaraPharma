@@ -1105,6 +1105,25 @@ async function quickNotesClientKey(c: Queryable): Promise<MigrationResult> {
   return { columns: "quick_notes.client_key" };
 }
 
+/** مهاجرت ۰۱۶ (افزودنی): ذخیره‌ی ماندگار فایل کاتالوگ در دیتابیس (Workers دیسک ندارد) */
+async function catalogBlobsTable(c: Queryable): Promise<MigrationResult> {
+  const adm = `current_setting('app.role', true) = 'admin'`;
+  await c.query(`
+    CREATE TABLE IF NOT EXISTS catalog_blobs (
+      file_key text PRIMARY KEY,
+      data bytea NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+    ALTER TABLE catalog_blobs ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE catalog_blobs FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS catalog_blobs_admin_policy ON catalog_blobs;
+    CREATE POLICY catalog_blobs_admin_policy ON catalog_blobs FOR ALL USING (${adm}) WITH CHECK (${adm});
+    REVOKE ALL ON catalog_blobs FROM ${APP_ROLE};
+    GRANT SELECT, INSERT, DELETE ON catalog_blobs TO ${APP_ROLE};
+  `);
+  return { tables: "catalog_blobs" };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -1124,6 +1143,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "013_security_hardening", up: securityHardening },
   { name: "014_error_log", up: errorLogTable },
   { name: "015_quick_notes_client_key", up: quickNotesClientKey },
+  { name: "016_catalog_blobs", up: catalogBlobsTable },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);

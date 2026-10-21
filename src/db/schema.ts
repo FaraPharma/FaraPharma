@@ -9,6 +9,7 @@ import {
   timestamp,
   index,
   uniqueIndex,
+  customType,
 } from "drizzle-orm/pg-core";
 
 /* ------------------------------------------------------------------ */
@@ -503,3 +504,22 @@ export const errorLog = pgTable(
   },
   (t) => [index("error_log_at_idx").on(t.at)]
 );
+
+const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+  toDriver(v) {
+    return Buffer.from(v);
+  },
+  fromDriver(v) {
+    return new Uint8Array(v);
+  },
+});
+
+/** محتوای فایل‌های کاتالوگ وقتی S3/R2 تنظیم نیست (Workers دیسک ماندگار ندارد). فقط با نقش مدیر/سیستم. */
+export const catalogBlobs = pgTable("catalog_blobs", {
+  fileKey: text("file_key").primaryKey(),
+  data: bytea("data").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
