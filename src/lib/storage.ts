@@ -57,7 +57,7 @@ export const storage: StorageAdapter = {
       return;
     }
     await withSystemRole((tx) =>
-      tx.insert(catalogBlobs).values({ fileKey: key, data: body }).onConflictDoUpdate({ target: catalogBlobs.fileKey, set: { data: body } })
+      tx.insert(catalogBlobs).values({ fileKey: key, data: body }).onConflictDoNothing() // کلید تصادفی یکتاست؛ UPDATE برای app_runtime بسته است
     );
   },
 
