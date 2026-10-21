@@ -109,7 +109,10 @@ export async function POST(
     // 2) store the file in the separate storage
     try {
       await storage.put(fileKey, buf, MIME_BY_EXT[ext]);
-    } catch {
+    } catch (e) {
+      logServerError("/api/visitors/[id]/catalog (storage.put)", e);
+      // ردیف بدون فایل باقی نماند
+      await withTenant(ctx, (tx) => tx.delete(catalogFiles).where(eq(catalogFiles.id, catalogId))).catch(() => undefined);
       return NextResponse.json(
         { error: "ذخیره فایل در مخزن ناموفق بود" },
         { status: 500 }
