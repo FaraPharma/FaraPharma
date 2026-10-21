@@ -30,6 +30,7 @@ import { GET as visitorsGET } from "@/app/api/visitors/route";
 import { GET as auditGET } from "@/app/api/admin/audit/route";
 import { GET as errorsGET } from "@/app/api/admin/errors/route";
 import { recordError } from "@/lib/error-log";
+import { storage } from "@/lib/storage";
 import { POST as notesSyncPOST } from "@/app/api/quick-notes/sync/route";
 
 /**
@@ -115,7 +116,7 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۳۷)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۳۸)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
   const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" ? stageParam : "all";
   const t0All = Date.now();
@@ -1438,6 +1439,25 @@ export async function GET(request: NextRequest) {
           return { pass, detail: pass ? "شاخص یکتای سه‌ستونه برقرار است (ورود اکسل با ON CONFLICT کار می‌کند)" : "شاخص یکتا وجود ندارد؛ مهاجرت ۰۱۷ را اجرا کنید" };
         });
 
+        // ---------- ۳۸) ذخیره‌ی فایل بزرگ در مخزن (روی همین Workers): نوشتن و خواندن بدون تغییر ----------
+        await test("۳۸) مخزن فایل: ۴ مگابایت نوشته و بدون تغییر خوانده می‌شود", async () => {
+          const key = `selftest/${stamp}.bin`;
+          const size = 4 * 1024 * 1024 + 123;
+          const data = new Uint8Array(size);
+          for (let o = 0; o < size; o += 65536) crypto.getRandomValues(data.subarray(o, Math.min(o + 65536, size)));
+          const t0 = Date.now();
+          try {
+            await storage.put(key, data, "application/octet-stream");
+            const back = await storage.get(key);
+            const same = !!back && back.length === size && back.every((b, i) => b === data[i]);
+            const missing = (await storage.get(`selftest/none-${stamp}.bin`)) === null;
+            const pass = same && missing;
+            return { pass, detail: pass ? `۴ مگابایت در ${Date.now() - t0}ms نوشته و عیناً خوانده شد؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing}` };
+          } finally {
+            await pool.query("DELETE FROM catalog_blob_parts WHERE file_key = $1", [key]);
+          }
+        });
+
         // ---------- ۳۳) RLS و FORCE جدول‌های جدید ----------
         await test("۳۳) جدول‌های audit_log و rate_limits دارای RLS فعال و FORCE هستند", async () => {
           const r = await pool.query("SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS frc FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname IN ('audit_log', 'rate_limits')");
@@ -1503,7 +1523,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 13 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 14 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
