@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { withSystemRole } from "@/db";
-import { catalogBlobs } from "@/db/schema";
+import { catalogBlobParts } from "@/db/schema";
 import { AwsClient } from "aws4fetch";
 
 /**
@@ -20,6 +20,9 @@ const S3_CONFIGURED =
   !!process.env.S3_BUCKET &&
   !!process.env.S3_ACCESS_KEY &&
   !!process.env.S3_SECRET_KEY;
+
+const CHUNK = 256 * 1024;
+const READ_BATCH = 8;
 
 let s3: AwsClient | null = null;
 
@@ -56,9 +59,12 @@ export const storage: StorageAdapter = {
       if (!res.ok) throw new Error(`S3 put failed: ${res.status}`);
       return;
     }
-    await withSystemRole((tx) =>
-      tx.insert(catalogBlobs).values({ fileKey: key, data: body }).onConflictDoNothing() // کلید تصادفی یکتاست؛ UPDATE برای app_runtime بسته است
-    );
+    // قطعه‌های کوچک در یک تراکنش: یک بسته‌ی چندمگابایتی روی اتصال Workers قطع می‌شد
+    await withSystemRole(async (tx) => {
+      for (let i = 0, off = 0; off < body.length || i === 0; i++, off += CHUNK) {
+        await tx.insert(catalogBlobParts).values({ fileKey: key, part: i, data: body.subarray(off, off + CHUNK) });
+      }
+    });
   },
 
   async get(key) {
@@ -67,7 +73,25 @@ export const storage: StorageAdapter = {
       if (!res.ok) return null;
       return new Uint8Array(await res.arrayBuffer());
     }
-    const rows = await withSystemRole((tx) => tx.select({ data: catalogBlobs.data }).from(catalogBlobs).where(eq(catalogBlobs.fileKey, key)).limit(1));
-    return rows[0]?.data ?? null;
+    const parts: Uint8Array[] = [];
+    for (let from = 0; ; from += READ_BATCH) {
+      const rows = await withSystemRole((tx) =>
+        tx
+          .select({ data: catalogBlobParts.data })
+          .from(catalogBlobParts)
+          .where(and(eq(catalogBlobParts.fileKey, key), gte(catalogBlobParts.part, from), lt(catalogBlobParts.part, from + READ_BATCH)))
+          .orderBy(asc(catalogBlobParts.part))
+      );
+      parts.push(...rows.map((r) => r.data));
+      if (rows.length < READ_BATCH) break;
+    }
+    if (parts.length === 0) return null;
+    const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let pos = 0;
+    for (const p of parts) {
+      out.set(p, pos);
+      pos += p.length;
+    }
+    return out;
   },
 };
