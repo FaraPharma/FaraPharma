@@ -505,15 +505,25 @@ export const errorLog = pgTable(
   (t) => [index("error_log_at_idx").on(t.at)]
 );
 
-const bytea = customType<{ data: Uint8Array; driverData: Buffer }>({
+// ارسال به‌صورت متن hex (\\xABCD…): ارسال باینریِ Buffer روی اتصال Workers به pooler اتصال را قطع می‌کرد
+const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
+const bytea = customType<{ data: Uint8Array; driverData: string }>({
   dataType() {
     return "bytea";
   },
   toDriver(v) {
-    return Buffer.from(v);
+    const out = new Array<string>(v.length);
+    for (let i = 0; i < v.length; i++) out[i] = HEX[v[i]];
+    return "\\x" + out.join("");
   },
-  fromDriver(v) {
-    return new Uint8Array(v);
+  fromDriver(v: unknown) {
+    if (typeof v === "string") {
+      const h = v.startsWith("\\x") ? v.slice(2) : v;
+      const out = new Uint8Array(h.length / 2);
+      for (let i = 0; i < out.length; i++) out[i] = parseInt(h.substr(i * 2, 2), 16);
+      return out;
+    }
+    return new Uint8Array(v as ArrayLike<number>);
   },
 });
 
