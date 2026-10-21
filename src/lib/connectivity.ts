@@ -70,3 +70,21 @@ export async function verifyRealConnection(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * بررسی واقعی اتصال با یک درخواست کوتاه. هر پاسخ از سرور (حتی خطا) یعنی شبکه وصل است.
+ * navigator.onLine روی اندروید با VPN/صرفه‌جویی داده اغلب اشتباه «آفلاین» می‌گوید.
+ */
+export async function probeOnline(timeoutMs = 6000): Promise<boolean> {
+  const ctrl = new AbortController();
+  const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    await fetch("/api/health", { cache: "no-store", signal: ctrl.signal });
+    markOnlineNow();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(t);
+  }
+}

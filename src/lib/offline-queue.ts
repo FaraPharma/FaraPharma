@@ -106,7 +106,18 @@ export async function enqueueQuickNote(body: string): Promise<{
 }
 
 /** فلاش صف: هرچه ممکن است به سرور بفرستد و ارسالشدهها را حذف کند */
-export async function flushQuickNotes(): Promise<{
+let flushing: Promise<{ sent: number; remaining: number }> | null = null;
+
+export function flushQuickNotes(): Promise<{
+  sent: number;
+  remaining: number;
+}> {
+  // همزمان فقط یک فلاش (رویداد online + باز شدن برنامه + ثبت جدید)
+  if (!flushing) flushing = doFlush().finally(() => (flushing = null));
+  return flushing;
+}
+
+async function doFlush(): Promise<{
   sent: number;
   remaining: number;
 }> {
@@ -117,11 +128,13 @@ export async function flushQuickNotes(): Promise<{
       const res = await fetch("/api/quick-notes/sync", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body: note.body, createdAt: note.createdAt }),
+        body: JSON.stringify({ body: note.body, createdAt: note.createdAt, clientKey: note.id }),
       });
       if (res.ok) {
         await remove(note.id);
         sent++;
+      } else if (res.status === 400) {
+        await remove(note.id); // رد دائمی (بدنه نامعتبر): در صف گیر نکند
       } else if (res.status === 401) {
         // بدون جلسه معتبر، صف را فلاش نمیکنیم
         break;
