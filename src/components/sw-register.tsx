@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { probeOnline } from "@/lib/connectivity";
 
 const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID || "dev";
 
@@ -13,9 +14,8 @@ function isEditing(): boolean {
 }
 
 export function SwRegister() {
-  const [offline, setOffline] = useState<boolean>(
-    typeof navigator !== "undefined" ? !navigator.onLine : false
-  );
+  // فقط وقتی «واقعاً» به سرور نرسیم آفلاین است (navigator.onLine تنها کافی نیست)
+  const [offline, setOffline] = useState<boolean>(false);
   const [updateReady, setUpdateReady] = useState(false);
   const dirtyRef = useRef(false); // کاربر چیزی در فرم تایپ کرده و هنوز ثبت نکرده
   const pathname = usePathname();
@@ -26,10 +26,21 @@ export function SwRegister() {
   }, [pathname]);
 
   useEffect(() => {
+    let alive = true;
+    const verify = async () => {
+      if (navigator.onLine) {
+        setOffline(false);
+        return;
+      }
+      const ok = await probeOnline();
+      if (alive) setOffline(!ok);
+    };
     const on = () => setOffline(false);
-    const off = () => setOffline(true);
+    const off = () => void verify();
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
+    void verify(); // مرورگر ممکن است از ابتدا اشتباه «آفلاین» بگوید
+    const poll = window.setInterval(() => void verify(), 15_000);
 
     const markDirty = (e: Event) => {
       const t = e.target as HTMLElement | null;
@@ -86,6 +97,8 @@ export function SwRegister() {
     }
 
     return () => {
+      alive = false;
+      window.clearInterval(poll);
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
       document.removeEventListener("input", markDirty, true);

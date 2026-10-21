@@ -7,6 +7,8 @@ import { usePathname } from "next/navigation";
 import { toast } from "sonner";
 import { addQuickNoteAction } from "@/actions/quickNotes";
 import { enqueueQuickNote, flushQuickNotes } from "@/lib/offline-queue";
+import { flushOrders } from "@/lib/outbox";
+import { probeOnline } from "@/lib/connectivity";
 import { MicButton } from "@/components/mic-button";
 
 const HIDDEN_PREFIXES = ["/login", "/register", "/privacy"];
@@ -39,9 +41,23 @@ export function QuickNoteFab() {
             toast.success(`${r.sent} یادداشت آفلاین همگامسازی شد`);
         })
         .catch(() => undefined);
+      flushOrders()
+        .then((r) => {
+          if (r.sent > 0) toast.success(`${r.sent} سفارش آفلاین ثبت شد`);
+          if (r.rejectedNew > 0) toast.error(`${r.rejectedNew} سفارش آفلاین توسط سرور رد شد؛ سفارش‌ها را بررسی کنید`);
+        })
+        .catch(() => undefined);
     };
+    const onVisible = () => {
+      if (!document.hidden) onOnline();
+    };
+    onOnline(); // باز شدن برنامه: صف‌های مانده ارسال شود (اگر آفلاین باشد بی‌اثر می‌ماند)
     window.addEventListener("online", onOnline);
-    return () => window.removeEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   if (HIDDEN_PREFIXES.some((p) => pathname.startsWith(p))) return null;
@@ -52,7 +68,7 @@ export function QuickNoteFab() {
       return;
     }
     setBusy(true);
-    if (navigator.onLine) {
+    if (navigator.onLine || (await probeOnline())) {
       // آنلاین: مسیر مستقیم (رفتار قبلی)
       const res = await addQuickNoteAction({ body });
       setBusy(false);
