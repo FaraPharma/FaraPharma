@@ -1133,10 +1133,10 @@ async function visitorProductsUnique(c: Queryable): Promise<MigrationResult> {
   const has = await c.query(`SELECT 1 FROM pg_index i WHERE i.indrelid = 'public.visitor_products'::regclass AND i.indisunique AND i.indpred IS NULL AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a WHERE a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)) = ARRAY['product_id','tenant_id','visitor_id']`);
   if (has.rows.length > 0) return { unique: "already exists" };
   const d = await c.query(
-    `DELETE FROM visitor_products WHERE id IN (SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY tenant_id, visitor_id, product_id ORDER BY updated_at DESC NULLS LAST, id DESC) AS rn FROM visitor_products) t WHERE rn > 1)`
+    `DELETE FROM visitor_products WHERE id IN (SELECT id FROM (SELECT id, row_number() OVER (PARTITION BY tenant_id, visitor_id, product_id ORDER BY updated_at DESC NULLS LAST, id DESC) AS rn FROM visitor_products) t WHERE rn > 1) RETURNING id`
   );
   await c.query(`CREATE UNIQUE INDEX IF NOT EXISTS visitor_products_tvp_uq ON visitor_products (tenant_id, visitor_id, product_id)`);
-  return { unique: "created", removedDuplicates: String(d.rowCount ?? 0) };
+  return { unique: "created", removedDuplicates: String(d.rows.length) };
 }
 
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
