@@ -17,7 +17,10 @@ export async function POST(request: NextRequest) {
     const j = (await request.json().catch(() => null)) as {
       body?: string;
       createdAt?: number;
+      clientKey?: string;
     } | null;
+    const clientKey =
+      typeof j?.clientKey === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(j.clientKey) ? j.clientKey : null;
     const body = (j?.body ?? "").trim();
     if (!body) return NextResponse.json({ error: "متن خالی است" }, { status: 400 });
 
@@ -30,7 +33,8 @@ export async function POST(request: NextRequest) {
         tenantId: ctx.tenantId,
         body: body.slice(0, 5000),
         createdAt,
-      });
+        clientKey,
+      }).onConflictDoNothing(); // ارسال مجدد با همان کلید: بدون ثبت تکراری
     });
     return NextResponse.json({ ok: true });
   } catch (e) {
