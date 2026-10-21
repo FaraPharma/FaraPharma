@@ -77,10 +77,22 @@ async function getCache(
   });
 }
 
+/** یک بار تلاش مجدد کوتاه؛ قطعی لحظه‌ای/خطای ۵xx نباید فوراً «آفلاین» نشان داده شود */
+async function fetchRetry(url: string): Promise<Response> {
+  try {
+    const r = await fetch(url);
+    if (r.status < 500) return r;
+  } catch {
+    /* تلاش دوباره */
+  }
+  await new Promise((res) => setTimeout(res, 800));
+  return fetch(url);
+}
+
 export async function offlineFetch<T>(url: string): Promise<OfflineResult<T>> {
   const cacheKey = `${url}|${clientTenant()}`;
   try {
-    const res = await fetch(url);
+    const res = await fetchRetry(url);
     // دریافت هر پاسخ واقعی از سرور (حتی خطا) یعنی مسیر شبکه زنده است
     markOnlineNow();
     if (res.ok) {

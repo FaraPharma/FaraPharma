@@ -79,7 +79,7 @@ export async function probeOnline(timeoutMs = 6000): Promise<boolean> {
   const ctrl = new AbortController();
   const t = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    await fetch("/api/health", { cache: "no-store", signal: ctrl.signal });
+    await fetch("/api/health?light=1", { cache: "no-store", signal: ctrl.signal });
     markOnlineNow();
     return true;
   } catch {
