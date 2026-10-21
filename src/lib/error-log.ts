@@ -19,8 +19,10 @@ export async function recordError(
 ): Promise<void> {
   try {
     logServerError(place, e);
-    const x = (e ?? {}) as { message?: string; code?: string; cause?: { code?: string } };
-    const message = sanitizeMessage(x.message ?? String(e));
+    const x = (e ?? {}) as { message?: string; code?: string; cause?: { code?: string; message?: string } };
+    // علت اصلی (cause) اول می‌آید؛ متن دستور SQL طولانی است و علت را قطع می‌کرد
+    const base = x.message ?? String(e);
+    const message = sanitizeMessage(x.cause?.message ? `${x.cause.message} :: ${base}` : base);
     const { withSystemRole } = await import("@/db");
     await withSystemRole((tx) =>
       tx.insert(errorLog).values({
