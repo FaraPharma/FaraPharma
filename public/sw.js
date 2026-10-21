@@ -12,7 +12,7 @@ const SW_VERSION = new URL(self.location.href).searchParams.get("v") || "dev";
 const VERSION = `pharma-${SW_VERSION}`;
 const STATIC_CACHE = `${VERSION}-static`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
-const NETWORK_TIMEOUT_MS = 3000;
+const NETWORK_TIMEOUT_MS = 8000;
 
 const PRECACHE = [
   "/",
@@ -24,7 +24,7 @@ const PRECACHE = [
 ];
 
 // مسیرهایی که هرگز کش نمی‌شوند
-const NO_CACHE_API = ["/api/selftest", "/api/admin/", "/api/auth-test", "/api/sentry-test", "/api/push/"];
+const NO_CACHE_API = ["/api/health", "/api/selftest", "/api/admin/", "/api/auth-test", "/api/sentry-test", "/api/push/"];
 
 /* کوکی pharma_tid (httpOnly نیست). هدر Cookie در service worker در دسترس نیست،
  * پس از cookieStore می‌خوانیم؛ اگر مرورگر پشتیبانی نکند null برمی‌گردد. */
