@@ -7,6 +7,7 @@ import { assertWritable } from "@/db/access";
 import { visitors, catalogFiles } from "@/db/schema";
 import { storage } from "@/lib/storage";
 import { logServerError } from "@/lib/log";
+import { recordError } from "@/lib/error-log";
 
 export const dynamic = "force-dynamic";
 
@@ -110,7 +111,7 @@ export async function POST(
     try {
       await storage.put(fileKey, buf, MIME_BY_EXT[ext]);
     } catch (e) {
-      logServerError("/api/visitors/[id]/catalog (storage.put)", e);
+      await recordError("/api/visitors/[id]/catalog (storage.put)", e, { tenantId: ctx.tenantId, userId: ctx.userId });
       // ردیف بدون فایل باقی نماند
       await withTenant(ctx, (tx) => tx.delete(catalogFiles).where(eq(catalogFiles.id, catalogId))).catch(() => undefined);
       return NextResponse.json(
