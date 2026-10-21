@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۳۶)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۳۷)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
   const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" ? stageParam : "all";
   const t0All = Date.now();
@@ -1431,6 +1431,13 @@ export async function GET(request: NextRequest) {
           return { pass, detail: pass ? "ارسال مجدد با همان کلید یک ردیف ساخت، کلید دیگر ردیف جدید، متن خالی رد شد؛ نشست مدیر برگشت (منطق IndexedDB در مرورگر با این آزمون پوشش داده نمی‌شود)" : `ناموفق: ${JSON.stringify(k)}` };
         });
 
+        // ---------- ۳۷) شاخص یکتای visitor_products (لازم برای ON CONFLICT ورود اکسل) ----------
+        await test("۳۷) visitor_products شاخص یکتای (tenant_id, visitor_id, product_id) دارد", async () => {
+          const q = await pool.query(`SELECT 1 FROM pg_index i WHERE i.indrelid = 'public.visitor_products'::regclass AND i.indisunique AND i.indpred IS NULL AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a WHERE a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)) = ARRAY['product_id','tenant_id','visitor_id']`);
+          const pass = q.rows.length > 0;
+          return { pass, detail: pass ? "شاخص یکتای سه‌ستونه برقرار است (ورود اکسل با ON CONFLICT کار می‌کند)" : "شاخص یکتا وجود ندارد؛ مهاجرت ۰۱۷ را اجرا کنید" };
+        });
+
         // ---------- ۳۳) RLS و FORCE جدول‌های جدید ----------
         await test("۳۳) جدول‌های audit_log و rate_limits دارای RLS فعال و FORCE هستند", async () => {
           const r = await pool.query("SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS frc FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname IN ('audit_log', 'rate_limits')");
@@ -1496,7 +1503,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 12 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 13 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
