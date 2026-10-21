@@ -523,3 +523,14 @@ export const catalogBlobs = pgTable("catalog_blobs", {
   data: bytea("data").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/** فایل‌های کاتالوگ در قطعه‌های ۲۵۶ کیلوبایتی (یک بسته‌ی چندمگابایتی روی اتصال Workers قطع می‌شد). فقط با نقش سیستم. */
+export const catalogBlobParts = pgTable(
+  "catalog_blob_parts",
+  {
+    fileKey: text("file_key").notNull(),
+    part: integer("part").notNull(),
+    data: bytea("data").notNull(),
+  },
+  (t) => [uniqueIndex("catalog_blob_parts_pk").on(t.fileKey, t.part)]
+);
