@@ -214,10 +214,10 @@ export default function VisitorsPage() {
   }
 
   /** آپلود PDF بهعنوان فایل مرجع ساده — بدون هیچ پردازش خودکار */
-  async function uploadCatalog(file: File) {
+  async function uploadCatalog(file: File, quiet = false) {
     if (!selected) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      toast.error("فقط فایل PDF قابل قبول است");
+    if (!/\.(pdf|xlsx|xls|csv)$/i.test(file.name)) {
+      toast.error("فقط فایل PDF یا اکسل قابل قبول است");
       return;
     }
     setCatBusy(true);
@@ -233,7 +233,7 @@ export default function VisitorsPage() {
         toast.error(j?.error ?? "خطا در آپلود فایل");
         return;
       }
-      toast.success("فایل کاتالوگ ذخیره شد — بهعنوان فایل مرجع در دسترس است");
+      if (!quiet) toast.success("فایل ذخیره شد — در فهرست فایل‌های ویزیتور در دسترس است");
       await load();
     } catch {
       toast.error("ارسال فایل ناموفق بود");
@@ -296,6 +296,8 @@ export default function VisitorsPage() {
         const skipped =
           (res.skipped ?? 0) > 0 ? ` — ${faNum(res.skipped ?? 0)} تکراری رد شد` : "";
         toast.success(`${faNum(res.added ?? 0)} کالای جدید + شرایط ثبت شد${skipped}`);
+        // اصل فایل اکسل هم در فهرست فایل‌های ویزیتور نگه داشته شود
+        if (/\.(xlsx|xls|csv)$/i.test(file.name)) void uploadCatalog(file, true);
         load();
       } else toast.error(res.error ?? "خطا در ورود فایل");
     } catch {
@@ -838,12 +840,12 @@ export default function VisitorsPage() {
             {/* Catalog PDF */}
             <section>
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-[color:var(--ink)]">کاتالوگ PDF</h3>
+                <h3 className="text-sm font-bold text-[color:var(--ink)]">فایل‌های ویزیتور (PDF / اکسل)</h3>
                 <label className="btn-secondary cursor-pointer px-3 py-1.5 text-xs">
-                  {catBusy ? "در حال آپلود…" : "آپلود کاتالوگ"}
+                  {catBusy ? "در حال آپلود…" : "آپلود فایل"}
                   <input
                     type="file"
-                    accept=".pdf,application/pdf"
+                    accept=".pdf,.xlsx,.xls,.csv,application/pdf"
                     className="hidden"
                     disabled={catBusy}
                     onChange={(e) => {
@@ -856,8 +858,7 @@ export default function VisitorsPage() {
               </div>
               {selectedCats.length === 0 ? (
                 <p className="rounded-xl bg-[color:var(--line)] px-3 py-2 text-center text-xs text-[color:var(--ink-soft)]">
-                  هنوز کاتالوگی آپلود نشده — PDF کاتالوگ ویزیتور را به‌عنوان فایل مرجع
-                  اینجا نگه دارید
+                  هنوز فایلی آپلود نشده — PDF یا اکسل ویزیتور را اینجا نگه دارید
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -872,7 +873,7 @@ export default function VisitorsPage() {
                             </span>
                           </div>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                            <Badge color="green">ذخیره‌شده</Badge>
+                            <Badge color="green">{(c.fileName.split(".").pop() ?? "").toUpperCase()} · ذخیره‌شده</Badge>
                             <span className="text-[10px] text-[color:var(--ink-soft)]">
                               {faDateTime(c.createdAt)}
                             </span>
