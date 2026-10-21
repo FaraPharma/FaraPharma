@@ -12,6 +12,13 @@ export const dynamic = "force-dynamic";
 
 const MAX_PDF_BYTES = 15 * 1024 * 1024;
 
+const MIME_BY_EXT: Record<string, string> = {
+  pdf: "application/pdf",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
+  csv: "text/csv",
+};
+
 /**
  * Uploads a PDF catalog as a simple reference file for a visitor.
  * No automatic processing of any kind: the file is stored in the separate
@@ -53,9 +60,10 @@ export async function POST(
     }
     const file = fileEntry as File;
     const fileName = file.name || "catalog.pdf";
-    if (!fileName.toLowerCase().endsWith(".pdf")) {
+    const ext = (fileName.toLowerCase().match(/\.(pdf|xlsx|xls|csv)$/) ?? [])[1];
+    if (!ext) {
       return NextResponse.json(
-        { error: "فقط فایل PDF قابل قبول است" },
+        { error: "فقط فایل PDF یا اکسل (xlsx / xls / csv) قابل قبول است" },
         { status: 400 }
       );
     }
@@ -82,7 +90,7 @@ export async function POST(
         )
         .limit(1);
       if (!v[0]) throw new AppError("ویزیتور یافت نشد", 404);
-      const key = `tenants/${ctx.tenantId}/catalogs/${visitorId}/${randomUUID()}.pdf`;
+      const key = `tenants/${ctx.tenantId}/catalogs/${visitorId}/${randomUUID()}.${ext}`;
       const row = await tx
         .insert(catalogFiles)
         .values({
@@ -90,7 +98,7 @@ export async function POST(
           visitorId,
           fileName,
           fileKey: key,
-          mimeType: file.type || "application/pdf",
+          mimeType: MIME_BY_EXT[ext],
           sizeBytes: buf.length,
           status: "stored",
         })
@@ -100,7 +108,7 @@ export async function POST(
 
     // 2) store the file in the separate storage
     try {
-      await storage.put(fileKey, buf, file.type || "application/pdf");
+      await storage.put(fileKey, buf, MIME_BY_EXT[ext]);
     } catch {
       return NextResponse.json(
         { error: "ذخیره فایل در مخزن ناموفق بود" },
