@@ -6,6 +6,8 @@ import { useOfflineData } from "@/hooks/useOfflineData";
 import { SubscriptionBanner } from "@/components/sub-banner";
 import { TRIAL_DAYS } from "@/lib/config";
 import { OfflineBadge } from "@/components/offline-badge";
+import { queueOrder } from "@/lib/outbox";
+import { probeOnline } from "@/lib/connectivity";
 import { JalaliDatePicker } from "@/lib/jalali";
 import {
   PageHeader,
@@ -96,6 +98,14 @@ export default function OrdersPage() {
     if (newOpen) clientKeyRef.current = newClientKey();
   }, [newOpen]);
 
+  // بعد از ثبتِ خودکار سفارش‌های آفلاین، فهرست تازه شود
+  useEffect(() => {
+    const h = () => load();
+    window.addEventListener("outbox-synced", h);
+    return () => window.removeEventListener("outbox-synced", h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // تبدیل یادداشت سریع به سفارش (از صفحه یادداشتها با #note=)
   useEffect(() => {
     const m = window.location.hash.match(/note=([0-9a-f-]{36})/);
@@ -175,20 +185,31 @@ export default function OrdersPage() {
     submitRef.current = true;
     setBusy(true);
     let res: Awaited<ReturnType<typeof createOrderAction>>;
+    let queued = false;
+    const payload = {
+      clientKey: clientKeyRef.current || undefined,
+      visitorId,
+      note: note || undefined,
+      settlementType,
+      settlementDays: toNum(settlementDays) || 0,
+      items: valid.map((it) => ({
+        productName: it.productName,
+        qty: toNum(it.qty) || 1,
+        unitPrice: toNum(it.unitPrice) || 0,
+        discountPct: toNum(it.discountPct) || 0,
+      })),
+    };
     try {
-      res = await createOrderAction({
-        clientKey: clientKeyRef.current || undefined,
-        visitorId,
-        note: note || undefined,
-        settlementType,
-        settlementDays: toNum(settlementDays) || 0,
-        items: valid.map((it) => ({
-          productName: it.productName,
-          qty: toNum(it.qty) || 1,
-          unitPrice: toNum(it.unitPrice) || 0,
-          discountPct: toNum(it.discountPct) || 0,
-        })),
-      });
+      res = await createOrderAction(payload);
+    } catch (err) {
+      // بدون اینترنت: سفارش در حافظه‌ی گوشی می‌ماند و با اتصال ثبت می‌شود (کلید یکتا = بدون تکرار)
+      if (err instanceof TypeError || !(await probeOnline())) {
+        await queueOrder(payload);
+        queued = true;
+        res = { ok: true };
+      } else {
+        throw err;
+      }
     } finally {
       submitRef.current = false;
       setBusy(false);
@@ -204,7 +225,10 @@ export default function OrdersPage() {
           orderId: res.id,
         });
       }
-      toast.success("سفارش ثبت شد");
+      if (queued) {
+        toast.success("اینترنت نیست؛ سفارش در گوشی ذخیره شد و با اتصال خودکار ثبت می‌شود", { duration: 6000 });
+        if (toNum(chequeAmount) > 0 && chequeDue) toast.error("چک این سفارش ثبت نشد؛ بعد از ثبت سفارش، چک را دستی اضافه کنید");
+      } else toast.success("سفارش ثبت شد");
       setNewOpen(false);
       setVisitorId("");
       setNote("");
