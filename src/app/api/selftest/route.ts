@@ -30,7 +30,7 @@ import { GET as visitorsGET } from "@/app/api/visitors/route";
 import { GET as auditGET } from "@/app/api/admin/audit/route";
 import { GET as errorsGET } from "@/app/api/admin/errors/route";
 import { recordError } from "@/lib/error-log";
-import { storage } from "@/lib/storage";
+import { storage, STORAGE_INFO } from "@/lib/storage";
 import { catalogFileChunks } from "@/db/schema";
 import { POST as notesSyncPOST } from "@/app/api/quick-notes/sync/route";
 
@@ -1466,15 +1466,17 @@ export async function GET(request: NextRequest) {
           const t0 = Date.now();
           try {
             await storage.put(key, data, "application/octet-stream");
+            const tw = Date.now() - t0;
             const back = await storage.get(key);
+            const tr = Date.now() - t0 - tw;
             const same = !!back && back.length === size && back.every((b, i) => b === data[i]);
             const missing = (await storage.get(`selftest/none-${stamp}.bin`)) === null;
             const pass = same && missing;
-            return { pass, detail: pass ? `۴ مگابایت در ${Date.now() - t0}ms نوشته و عیناً خوانده شد؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing}` };
+            return { pass, detail: pass ? `۴ مگابایت عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B` };
           } catch (e) {
             // تشخیص: کدام اندازه‌ی متن روی اتصال Workers می‌گذرد؟ (هر اندازه در تراکنش جدا)
             const probe: string[] = [];
-            for (const kb of [1, 16, 64, 256]) {
+            for (const kb of [8, 16, 24, 32, 48]) {
               try {
                 await withSystemRole((tx) => tx.insert(catalogFileChunks).values({ fileKey: `selftest/probe-${stamp}`, part: kb, b64: "A".repeat(kb * 1024) }));
                 probe.push(`${kb}KB:ok`);
@@ -1482,7 +1484,7 @@ export async function GET(request: NextRequest) {
                 probe.push(`${kb}KB:FAIL(${(pe instanceof Error ? pe.message : String(pe)).slice(0, 80)})`);
               }
             }
-            const msg = `${e instanceof Error ? e.message.slice(0, 160) : String(e)} | probe: ${probe.join(" ")}`;
+            const msg = `chunk=${STORAGE_INFO.chunkBytes}B×${STORAGE_INFO.rowsPerInsert}/INSERT، ${Date.now() - t0}ms: ${e instanceof Error ? e.message.slice(0, 160) : String(e)} | probe: ${probe.join(" ")}`;
             await recordError("selftest/38 storage", new Error(msg));
             return { pass: false, detail: msg };
           } finally {
