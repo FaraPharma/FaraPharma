@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { Client, Pool, type PoolClient } from "pg";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { requireAdmin, signSession } from "@/lib/auth";
-import { withTenant } from "@/db";
+import { withTenant, withSystemRole } from "@/db";
 import { writeAudit } from "@/lib/audit";
 import { AUTH_COOKIE } from "@/lib/config";
 import { ensureDb } from "@/db/bootstrap";
@@ -31,6 +31,7 @@ import { GET as auditGET } from "@/app/api/admin/audit/route";
 import { GET as errorsGET } from "@/app/api/admin/errors/route";
 import { recordError } from "@/lib/error-log";
 import { storage } from "@/lib/storage";
+import { catalogFileChunks } from "@/db/schema";
 import { POST as notesSyncPOST } from "@/app/api/quick-notes/sync/route";
 
 /**
@@ -1105,9 +1106,12 @@ export async function GET(request: NextRequest) {
       // ================= آزمون‌های امنیتی (stage=sec) =================
       if (stage === "sec") {
         const errCode = (e: unknown) => String((e as { code?: string }).code ?? "ERR");
-        const testIp = () => `203.0.113.${Math.floor(Math.random() * 250) + 1}`; // محدوده‌ی مستندسازی؛ هرگز IP واقعی کاربر نیست
+        const r16 = () => Math.floor(Math.random() * 65536).toString(16);
+        const testIp = () => `2001:db8:${r16()}:${r16()}::${r16()}`; // محدوده‌ی مستندسازی IPv6؛ فضای بزرگ = بدون برخورد با ردیف مانده؛ هرگز IP واقعی کاربر نیست
         const trackKey = async (b: IpBucket, ip: string) => {
-          S.rlKeys!.push(await rateLimitKey(b, ip));
+          const k = await rateLimitKey(b, ip);
+          S.rlKeys!.push(k);
+          await pool.query("DELETE FROM rate_limits WHERE key = $1", [k]); // شروع از وضعیت پاک
         };
         const tenantB = S.userB as string;
 
@@ -1119,15 +1123,23 @@ export async function GET(request: NextRequest) {
           let lockedAtAttempt = 0;
           let tenthLocked = false;
           let msg = "";
-          for (let i = 1; i <= 11; i++) {
-            const c = await checkIpLock("login-fail", ip);
-            if (c.locked) {
-              lockedAtAttempt = i;
-              msg = ipLockMessage(c.retryAfterMin ?? 0);
-              break;
+          const trace: string[] = [];
+          let loopErr = "";
+          try {
+            for (let i = 1; i <= 11; i++) {
+              const c = await checkIpLock("login-fail", ip);
+              if (c.locked) {
+                lockedAtAttempt = i;
+                msg = ipLockMessage(c.retryAfterMin ?? 0);
+                trace.push(`${i}:L`);
+                break;
+              }
+              const r = await recordIpAttempt("login-fail", ip);
+              trace.push(`${i}:${r.locked ? "lock" : "ok"}`);
+              if (i === IP_RULES["login-fail"].max) tenthLocked = r.locked;
             }
-            const r = await recordIpAttempt("login-fail", ip);
-            if (i === IP_RULES["login-fail"].max) tenthLocked = r.locked;
+          } catch (e) {
+            loopErr = e instanceof Error ? e.message.slice(0, 200) : String(e);
           }
           const otherFree = !(await checkIpLock("login-fail", other)).locked;
           const raw = await pool.query("SELECT count(*)::int AS n FROM rate_limits WHERE key = $1 OR key = $2", [ip, `login-fail:${ip}`]);
@@ -1138,8 +1150,14 @@ export async function GET(request: NextRequest) {
             otherIpFree: otherFree,
             rawIpNotStored: raw.rows[0].n === 0,
           };
-          const pass = Object.values(k).every(Boolean);
-          return { pass, detail: pass ? `ده شکست قفل را فعال کرد و تلاش ۱۱ رد شد؛ «${msg}»؛ IP دیگر آزاد؛ IP خام ذخیره نمی‌شود (IP آزمایشی، نه IP واقعی)` : `ناموفق: ${JSON.stringify(k)}` };
+          const pass = Object.values(k).every(Boolean) && !loopErr;
+          let detail = `ده شکست قفل را فعال کرد و تلاش ۱۱ رد شد؛ «${msg}»؛ IP دیگر آزاد؛ IP خام ذخیره نمی‌شود (IP آزمایشی، نه IP واقعی)`;
+          if (!pass) {
+            const snap = await pool.query("SELECT count, locked_until, window_start FROM rate_limits WHERE key = $1", [await rateLimitKey("login-fail", ip)]);
+            detail = `ناموفق: ${JSON.stringify(k)} trace=[${trace.join(",")}] error=${loopErr || "-"} row=${JSON.stringify(snap.rows[0] ?? null)}`;
+            await recordError("selftest/26 rate-limit", new Error(detail));
+          }
+          return { pass, detail };
         });
 
         // ---------- ۲۷) باز شدن قفل بعد از زمان مقرر ----------
@@ -1453,8 +1471,22 @@ export async function GET(request: NextRequest) {
             const missing = (await storage.get(`selftest/none-${stamp}.bin`)) === null;
             const pass = same && missing;
             return { pass, detail: pass ? `۴ مگابایت در ${Date.now() - t0}ms نوشته و عیناً خوانده شد؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing}` };
+          } catch (e) {
+            // تشخیص: کدام اندازه‌ی متن روی اتصال Workers می‌گذرد؟ (هر اندازه در تراکنش جدا)
+            const probe: string[] = [];
+            for (const kb of [1, 16, 64, 256]) {
+              try {
+                await withSystemRole((tx) => tx.insert(catalogFileChunks).values({ fileKey: `selftest/probe-${stamp}`, part: kb, b64: "A".repeat(kb * 1024) }));
+                probe.push(`${kb}KB:ok`);
+              } catch (pe) {
+                probe.push(`${kb}KB:FAIL(${(pe instanceof Error ? pe.message : String(pe)).slice(0, 80)})`);
+              }
+            }
+            const msg = `${e instanceof Error ? e.message.slice(0, 160) : String(e)} | probe: ${probe.join(" ")}`;
+            await recordError("selftest/38 storage", new Error(msg));
+            return { pass: false, detail: msg };
           } finally {
-            await pool.query("DELETE FROM catalog_blob_parts WHERE file_key = $1", [key]);
+            await pool.query("DELETE FROM catalog_file_chunks WHERE file_key = $1 OR file_key = $2", [key, `selftest/probe-${stamp}`]);
           }
         });
 
