@@ -31,6 +31,7 @@ import { GET as auditGET } from "@/app/api/admin/audit/route";
 import { GET as errorsGET } from "@/app/api/admin/errors/route";
 import { recordError } from "@/lib/error-log";
 import { storage, STORAGE_INFO } from "@/lib/storage";
+import { POOL_REV } from "@/db/pool";
 import { catalogFileChunks } from "@/db/schema";
 import { POST as notesSyncPOST } from "@/app/api/quick-notes/sync/route";
 
@@ -1472,7 +1473,7 @@ export async function GET(request: NextRequest) {
             const same = !!back && back.length === size && back.every((b, i) => b === data[i]);
             const missing = (await storage.get(`selftest/none-${stamp}.bin`)) === null;
             const pass = same && missing;
-            return { pass, detail: pass ? `۴ مگابایت عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B` };
+            return { pass, detail: pass ? `۴ مگابایت عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ poolRev=${POOL_REV}؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B poolRev=${POOL_REV}` };
           } catch (e) {
             // تشخیص: کدام اندازه‌ی متن روی اتصال Workers می‌گذرد؟ (هر اندازه در تراکنش جدا)
             const probe: string[] = [];
@@ -1484,7 +1485,7 @@ export async function GET(request: NextRequest) {
                 probe.push(`${kb}KB:FAIL(${(pe instanceof Error ? pe.message : String(pe)).slice(0, 80)})`);
               }
             }
-            const msg = `chunk=${STORAGE_INFO.chunkBytes}B×${STORAGE_INFO.rowsPerInsert}/INSERT، ${Date.now() - t0}ms: ${e instanceof Error ? e.message.slice(0, 160) : String(e)} | probe: ${probe.join(" ")}`;
+            const msg = `poolRev=${POOL_REV} chunk=${STORAGE_INFO.chunkBytes}B×${STORAGE_INFO.rowsPerInsert}/INSERT، ${Date.now() - t0}ms: ${e instanceof Error ? e.message.slice(0, 160) : String(e)} | probe: ${probe.join(" ")}`;
             await recordError("selftest/38 storage", new Error(msg));
             return { pass: false, detail: msg };
           } finally {
