@@ -53,6 +53,13 @@ export interface Condition {
   visitorPhone?: string | null;
   productName?: string;
   productCode?: string | null;
+  code?: string | null;
+  warehouse?: string | null;
+  unit?: string | null;
+  qty?: string | null;
+  amount?: number | null;
+  rawName?: string | null;
+  extra?: Record<string, string> | null;
 }
 
 export interface QuickNote {
