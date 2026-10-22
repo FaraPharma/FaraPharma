@@ -6,6 +6,7 @@ import { APP_NAME, APP_DESCRIPTION } from "@/lib/config";
 import { TopBar } from "@/components/top-bar";
 import { BottomNav } from "@/components/bottom-nav";
 import { SwRegister } from "@/components/sw-register";
+import { ClientErrorReporter } from "@/components/client-error-reporter";
 import { QuickNoteFab } from "@/components/quick-note-fab";
 import { ChequeReminders } from "@/components/cheque-reminders";
 import { ConnectivityGuard } from "@/components/connectivity-guard";
@@ -47,6 +48,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <ChequeReminders />
         </ConnectivityGuard>
         <SwRegister />
+        <ClientErrorReporter />
         <Toaster richColors position="top-center" dir="rtl" closeButton />
       </body>
     </html>
