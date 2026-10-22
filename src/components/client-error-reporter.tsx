@@ -37,11 +37,50 @@ export function ClientErrorReporter() {
         }
       }
     };
+    // ---- گزارش کندی واقعی روی گوشی کاربر (حداکثر ۵ مورد در هر بارگذاری) ----
+    let perfSent = 0;
+    const reportPerf = (msg: string) => {
+      if (perfSent >= 5) return;
+      perfSent++;
+      fetch("/api/client-error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ place: `${location.pathname} [perf]`, message: msg.slice(0, 300) }),
+        keepalive: true,
+      }).catch(() => undefined);
+    };
+    const checkNav = () => {
+      const n = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+      if (n && n.loadEventEnd > 0 && n.duration > 4000) {
+        reportPerf(`[perf] ttfb=${Math.round(n.responseStart)} dcl=${Math.round(n.domContentLoadedEventEnd)} load=${Math.round(n.duration)}ms`);
+      }
+    };
+    if (document.readyState === "complete") window.setTimeout(checkNav, 0);
+    else window.addEventListener("load", () => window.setTimeout(checkNav, 0), { once: true });
+    let po: PerformanceObserver | null = null;
+    try {
+      po = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          if (e.duration < 3000 || e.name.includes("/api/client-error")) continue;
+          let path = e.name;
+          try {
+            path = new URL(e.name).pathname;
+          } catch {
+            /* ignore */
+          }
+          reportPerf(`[slow] ${path} ${Math.round(e.duration)}ms`);
+        }
+      });
+      po.observe({ type: "resource", buffered: true });
+    } catch {
+      po = null;
+    }
     const onErr = (e: ErrorEvent) => report(e.message || (e.error instanceof Error ? e.error.message : String(e.error ?? "")));
     const onRej = (e: PromiseRejectionEvent) => report(e.reason instanceof Error ? e.reason.message : String(e.reason ?? ""));
     window.addEventListener("error", onErr);
     window.addEventListener("unhandledrejection", onRej);
     return () => {
+      po?.disconnect();
       window.removeEventListener("error", onErr);
       window.removeEventListener("unhandledrejection", onRej);
     };
