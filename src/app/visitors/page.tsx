@@ -30,6 +30,8 @@ import {
   deleteConditionAction,
 } from "@/actions/visitors";
 import { bulkAddVisitorProductsAction } from "@/actions/visitorProducts";
+import { ListImportDialog, ConditionDetails } from "@/components/list-import-dialog";
+import { normalizeFa } from "@/lib/list-import";
 import { whatsappUrl, telegramUrl, baleUrl, rubikaUrl } from "@/lib/domain";
 import { cn, faDate, faDateTime, faNum, toman, toNum } from "@/lib/format";
 import type {
@@ -244,6 +246,20 @@ export default function VisitorsPage() {
 
   const selectedNotes = selected ? data?.notes.filter((n) => n.visitorId === selected.id) ?? [] : [];
   const selectedConds = selected ? data?.conditions.filter((c) => c.visitorId === selected.id) ?? [] : [];
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [condQuery, setCondQuery] = useState("");
+  const [condShowAll, setCondShowAll] = useState(false);
+  const visibleConds = useMemo(() => {
+    const q = normalizeFa(condQuery).toLowerCase();
+    if (!q) return selectedConds;
+    return selectedConds.filter((c) =>
+      normalizeFa(
+        [c.productName, c.code, c.productCode, c.offer, c.warehouse, c.rawName, ...Object.values(c.extra ?? {})].filter(Boolean).join(" ")
+      )
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [selectedConds, condQuery]);
   const selectedCats = selected ? data?.catalogs.filter((c) => c.visitorId === selected.id) ?? [] : [];
 
   /**
@@ -653,15 +669,15 @@ export default function VisitorsPage() {
                   className="flex-1 cursor-pointer rounded-xl py-1.5 text-center text-[11px] font-bold"
                   style={{ color: "var(--ink-soft)" }}
                 >
-                  آپلود اکسل
+                  لیست از فایل (اکسل / PDF)
                   <input
                     type="file"
-                    accept=".xlsx,.xls,.csv"
+                    accept=".xlsx,.xls,.csv,.pdf,application/pdf"
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0];
                       e.currentTarget.value = "";
-                      if (f) handleVisitorExcelConfirmed(f);
+                      if (f) setImportFile(f);
                     }}
                   />
                 </label>
@@ -778,7 +794,16 @@ export default function VisitorsPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {selectedConds.map((c) => {
+                  {selectedConds.length > 12 && (
+                    <input
+                      value={condQuery}
+                      onChange={(e) => setCondQuery(e.target.value)}
+                      placeholder={`جستجو در ${faNum(selectedConds.length)} کالای این ویزیتور…`}
+                      className="w-full rounded-xl border px-3 py-2 text-xs"
+                      style={{ borderColor: "var(--line)", background: "var(--surface)", color: "var(--ink)" }}
+                    />
+                  )}
+                  {(condShowAll || condQuery ? visibleConds : visibleConds.slice(0, 60)).map((c) => {
                     const s = STOCK_BADGE[c.stock];
                     return (
                       <div
@@ -805,6 +830,7 @@ export default function VisitorsPage() {
                             {c.offer && (
                               <p className="mt-1 text-[11px] text-[color:var(--ink-soft)]">{c.offer}</p>
                             )}
+                            <ConditionDetails c={c} />
                             <TrendPanel
                               history={data!.history.filter(
                                 (h) =>
@@ -833,9 +859,33 @@ export default function VisitorsPage() {
                       </div>
                     );
                   })}
+                  {!condShowAll && !condQuery && visibleConds.length > 60 && (
+                    <button type="button" onClick={() => setCondShowAll(true)} className="btn-secondary w-full py-2 text-xs">
+                      نمایش همه‌ی {faNum(visibleConds.length)} کالا
+                    </button>
+                  )}
+                  {condQuery && visibleConds.length === 0 && (
+                    <p className="py-3 text-center text-[11px]" style={{ color: "var(--ink-soft)" }}>موردی پیدا نشد</p>
+                  )}
                 </div>
               )}
             </section>
+
+            {importFile && selected && (
+              <ListImportDialog
+                visitorId={selected.id}
+                visitorName={selected.name}
+                file={importFile}
+                existingCount={selectedConds.length}
+                onClose={() => setImportFile(null)}
+                onSaved={(f) => {
+                  setImportFile(null);
+                  setCondQuery("");
+                  load();
+                  void uploadCatalog(f, true); // اصل فایل هم در «فایل‌های ویزیتور» بماند
+                }}
+              />
+            )}
 
             {/* Catalog PDF */}
             <section>
