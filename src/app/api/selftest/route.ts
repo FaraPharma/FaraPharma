@@ -31,6 +31,8 @@ import { GET as auditGET } from "@/app/api/admin/audit/route";
 import { GET as errorsGET } from "@/app/api/admin/errors/route";
 import { recordError } from "@/lib/error-log";
 import { storage, STORAGE_INFO } from "@/lib/storage";
+import { importVisitorListAction } from "@/actions/listImport";
+import { parseTable, visualToLogical } from "@/lib/list-import";
 import { POOL_REV } from "@/db/pool";
 import { catalogFileChunks } from "@/db/schema";
 import { POST as notesSyncPOST } from "@/app/api/quick-notes/sync/route";
@@ -118,7 +120,7 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۳۸)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
   const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" ? stageParam : "all";
   const t0All = Date.now();
@@ -1493,6 +1495,72 @@ export async function GET(request: NextRequest) {
           }
         });
 
+        // ---------- ۳۹) خواندن لیست (قاعده‌ها، بدون دیتابیس) ----------
+        await test("۳۹) خواندن لیست: ترتیب حروف PDF، نقش ستون‌ها، ارقام فارسی، ردیف جمع، مبلغ ناهمخوان", async () => {
+          const rev = visualToLogical("لوﻠﺣﻣ"); // «محلول» به ترتیب دیداری
+          const num = visualToLogical("٩۵٢،٢٩٧،۵٠٠"); // عدد نباید برعکس شود
+          const r = parseTable([
+            ["ردیف", "کد کالا", "نام کالا", "مانده", "قیمت واحد", "مبلغ", "توضیحات"],
+            [1, "۱۰۱", "شامپو الف", "۱۰", "۱٬۰۰۰", "۱۰٬۰۰۰", "نکته"],
+            [2, "۱۰۲", "کرم ب ب", "۵", "۲۰۰", "۵۰۰۰", ""],
+            ["", "", "جمع", "", "", "۱۰٬۹۹۹", ""],
+          ]);
+          const k = {
+            reversedWord: rev === "محلول",
+            numberKept: num === "952،297،500" || num === "952,297,500" || num.replace(/[,،]/g, "") === "952297500",
+            twoRows: r.rows.length === 2,
+            roles: r.columns.map((c) => c.role).join(",") === "extra,code,name,qty,price,amount,extra",
+            numbers: r.rows[0]?.price === 1000 && r.rows[0]?.qty === 10 && r.rows[0]?.amount === 10000,
+            extraKept: r.rows[0]?.extra["توضیحات"] === "نکته",
+            mismatchFlagged: r.suspicious === 1,
+          };
+          const pass = Object.values(k).every(Boolean);
+          return { pass, detail: pass ? "ترتیب حروف، نقش ستون‌ها، ارقام فارسی، حذف ردیف «جمع» و کنترل مبلغ درست کار کرد" : `ناموفق: ${JSON.stringify(k)}` };
+        });
+
+        // ---------- ۴۰) ثبت لیست در دیتابیس (نشست صاحب داروخانه‌ی آزمایشی) ----------
+        await test("۴۰) ثبت لیست ویزیتور: ساخت، به‌روزرسانی، تاریخچه، ناموجود، بدون تکرار، همه‌ی ستون‌ها", async () => {
+          const adminTok = request.cookies.get(AUTH_COOKIE)?.value;
+          const adminTid = request.cookies.get("pharma_tid")?.value;
+          const store = await cookies();
+          const opts = { sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30 };
+          const pfx = `selftest-item-${stamp}-`;
+          const vis = await pool.query("INSERT INTO visitors (tenant_id, name) VALUES ($1, $2) RETURNING id", [tenantB, `selftest-visitor-${stamp}`]);
+          const vid = vis.rows[0].id as string;
+          const k: Record<string, boolean> = {};
+          try {
+            const tokB = await signSession({ sub: tenantB, tid: tenantB, role: "owner", email: S.emailB as string });
+            store.set(AUTH_COOKIE, tokB, { ...opts, httpOnly: true });
+            store.set("pharma_tid", tenantB, { ...opts, httpOnly: false });
+            const mk = (i: number, extra: Record<string, unknown> = {}) => ({ code: `C${i}`, name: `${pfx}${i}`, qty: 10 + i, unit: "عدد", warehouse: "2", price: 1000 + i, amount: (10 + i) * (1000 + i), extra: { "ستون ناشناخته": `v${i}` }, ...extra });
+            const first = Array.from({ length: 45 }, (_, i) => mk(i));
+            first.push(mk(5)); // ردیف هم‌نام در همان فایل: خطای upsert ندهد
+            first.push({ name: "x" } as ReturnType<typeof mk>); // نامعتبر
+            const r1 = await importVisitorListAction({ visitorId: vid, rows: first });
+            k.firstOk = r1.ok === true && r1.newProducts === 45 && r1.created === 45 && r1.updated === 0 && r1.invalid === 1;
+            const c1 = await pool.query("SELECT count(*)::int AS n FROM visitor_products WHERE visitor_id = $1", [vid]);
+            const row3 = (await pool.query("SELECT code, warehouse, unit, qty::text AS qty, amount, extra FROM visitor_products vp JOIN products p ON p.id = vp.product_id WHERE vp.visitor_id = $1 AND p.name = $2", [vid, `${pfx}3`])).rows[0];
+            k.countAndColumns = c1.rows[0].n === 45 && row3?.code === "C3" && row3?.unit === "عدد" && row3?.qty === "13" && Number(row3?.amount) === 13 * 1003 && row3?.extra?.["ستون ناشناخته"] === "v3";
+            // ورود دوم: ردیف ۰ حذف، قیمت ردیف ۱ تغییر، مانده‌ی ردیف ۲ صفر
+            const second = Array.from({ length: 45 }, (_, i) => i).filter((i) => i !== 0).map((i) => mk(i, i === 1 ? { price: 5000, amount: 5000 * 11 } : i === 2 ? { qty: 0, amount: 0 } : {}));
+            const r2 = await importVisitorListAction({ visitorId: vid, rows: second });
+            k.secondOk = r2.ok === true && r2.newProducts === 0 && r2.created === 0 && r2.updated === 44 && r2.markedOut === 1 && (r2.history ?? 0) >= 2;
+            const st = await pool.query("SELECT p.name, vp.stock, vp.price FROM visitor_products vp JOIN products p ON p.id = vp.product_id WHERE vp.visitor_id = $1 AND p.name = ANY($2)", [vid, [`${pfx}0`, `${pfx}1`, `${pfx}2`]]);
+            const by = Object.fromEntries(st.rows.map((x) => [x.name, x]));
+            k.statesAndPrice = by[`${pfx}0`]?.stock === "out" && by[`${pfx}2`]?.stock === "out" && by[`${pfx}1`]?.price === 5000;
+            const h = await pool.query("SELECT count(*)::int AS n FROM visitor_product_history WHERE visitor_id = $1", [vid]);
+            const c2 = await pool.query("SELECT count(*)::int AS n FROM visitor_products WHERE visitor_id = $1", [vid]);
+            k.historyAndNoDup = h.rows[0].n >= 2 && c2.rows[0].n === 45;
+          } finally {
+            if (adminTok) store.set(AUTH_COOKIE, adminTok, { ...opts, httpOnly: true });
+            if (adminTid) store.set("pharma_tid", adminTid, { ...opts, httpOnly: false });
+            await pool.query("DELETE FROM visitors WHERE id = $1", [vid]);
+            await pool.query("DELETE FROM products WHERE tenant_id = $1 AND name LIKE $2", [tenantB, `${pfx}%`]);
+          }
+          const pass = Object.values(k).every(Boolean);
+          return { pass, detail: pass ? "ورود اول ۴۵ کالا ساخت (هم‌نام و نامعتبر رد شد)، ورود دوم ۴۴ را به‌روز کرد، یک کالا «ناموجود» شد، تاریخچه ثبت شد و همه‌ی ستون‌ها (کد، انبار، واحد، مانده، مبلغ، extra) ماند؛ نشست مدیر برگشت" : `ناموفق: ${JSON.stringify(k)}` };
+        });
+
         // ---------- ۳۳) RLS و FORCE جدول‌های جدید ----------
         await test("۳۳) جدول‌های audit_log و rate_limits دارای RLS فعال و FORCE هستند", async () => {
           const r = await pool.query("SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS frc FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname IN ('audit_log', 'rate_limits')");
@@ -1558,7 +1626,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 14 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
