@@ -18,6 +18,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/web-push": "^3.6.4",
     "aws4fetch": "^1.0.20",
+    "pdfjs-dist": "4.10.38",
     "bcryptjs": "^3.0.3",
     "dotenv": "17.3.1",
     "drizzle-orm": "0.45.2",
