@@ -113,7 +113,10 @@ export function getPool(): Pool {
   }
 
   let p = perRequest.get(ctx);
-  if (!p || (p as unknown as { ended?: boolean }).ended) {
+  // «ending» هم باید بررسی شود: بعد از end() (مهلت ۲۵ثانیه‌ی safety) تا خالی شدن اتصال‌ها ended هنوز false است
+  // و connect() خطای «Cannot use a pool after calling end» می‌دهد؛ در این حالت Pool تازه می‌سازیم.
+  const st = p as unknown as { ended?: boolean; ending?: boolean } | undefined;
+  if (!p || st?.ended || st?.ending) {
     p = createPool();
     perRequest.set(ctx, p);
     closeWhenIdle(p, ctx);
