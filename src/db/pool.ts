@@ -8,6 +8,9 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
  * آخرین کوئری بسته می‌شود. در توسعه/اسکریپت‌ها همان Pool سراسری قبلی است.
  */
 
+/** نشانه‌ی نسخه‌ی دیپلوی‌شده (آزمون ۳۸ آن را گزارش می‌کند تا معلوم باشد این فایل زنده است) */
+export const POOL_REV = "ending-check-1";
+
 const POOL_OPTIONS = {
   max: 1,
   idleTimeoutMillis: 1_000, // اتصال بیکار بعد از ۱ ثانیه بسته می‌شود
