@@ -1179,6 +1179,23 @@ async function catalogFileChunksTable(c: Queryable): Promise<MigrationResult> {
   return { tables: "catalog_file_chunks" };
 }
 
+/** مهاجرت ۰۲۰ (افزودنی): ستون‌های کامل لیست ویزیتور (کد، انبار، واحد، مانده، مبلغ، ستون‌های اضافه، شناسه‌ی ورود) */
+async function visitorProductsListColumns(c: Queryable): Promise<MigrationResult> {
+  await c.query(`
+    ALTER TABLE visitor_products
+      ADD COLUMN IF NOT EXISTS code text,
+      ADD COLUMN IF NOT EXISTS warehouse text,
+      ADD COLUMN IF NOT EXISTS unit text,
+      ADD COLUMN IF NOT EXISTS qty numeric,
+      ADD COLUMN IF NOT EXISTS amount bigint,
+      ADD COLUMN IF NOT EXISTS raw_name text,
+      ADD COLUMN IF NOT EXISTS extra jsonb,
+      ADD COLUMN IF NOT EXISTS source_file_id uuid,
+      ADD COLUMN IF NOT EXISTS last_import_id uuid;
+  `);
+  return { columns: "visitor_products: code, warehouse, unit, qty, amount, raw_name, extra, source_file_id, last_import_id" };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -1202,6 +1219,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "017_visitor_products_unique", up: visitorProductsUnique },
   { name: "018_catalog_blob_parts", up: catalogBlobPartsTable },
   { name: "019_catalog_file_chunks", up: catalogFileChunksTable },
+  { name: "020_visitor_products_list_columns", up: visitorProductsListColumns },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);

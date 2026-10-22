@@ -10,6 +10,8 @@ import {
   index,
   uniqueIndex,
   customType,
+  numeric,
+  bigint,
 } from "drizzle-orm/pg-core";
 
 /* ------------------------------------------------------------------ */
@@ -131,6 +133,16 @@ export const visitorProducts = pgTable(
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
     // in | low | out
+    // اطلاعات کامل لیست ویزیتور (ورود از اکسل/PDF)
+    code: text("code"),
+    warehouse: text("warehouse"),
+    unit: text("unit"),
+    qty: numeric("qty"),
+    amount: bigint("amount", { mode: "number" }),
+    rawName: text("raw_name"),
+    extra: jsonb("extra").$type<Record<string, string>>(),
+    sourceFileId: uuid("source_file_id"),
+    lastImportId: uuid("last_import_id"),
     stock: text("stock").notNull().default("in"),
     cashDiscountPct: integer("cash_discount_pct").notNull().default(0),
     checkDays: integer("check_days").notNull().default(0),
