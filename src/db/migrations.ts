@@ -1159,6 +1159,26 @@ async function catalogBlobPartsTable(c: Queryable): Promise<MigrationResult> {
   return { tables: "catalog_blob_parts" };
 }
 
+/** مهاجرت ۰۱۹ (افزودنی): فایل کاتالوگ به‌صورت base64 در ستون text و قطعه‌های کوچک (بدون bytea) */
+async function catalogFileChunksTable(c: Queryable): Promise<MigrationResult> {
+  const adm = `current_setting('app.role', true) = 'admin'`;
+  await c.query(`
+    CREATE TABLE IF NOT EXISTS catalog_file_chunks (
+      file_key text NOT NULL,
+      part integer NOT NULL,
+      b64 text NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS catalog_file_chunks_pk ON catalog_file_chunks (file_key, part);
+    ALTER TABLE catalog_file_chunks ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE catalog_file_chunks FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS catalog_file_chunks_admin_policy ON catalog_file_chunks;
+    CREATE POLICY catalog_file_chunks_admin_policy ON catalog_file_chunks FOR ALL USING (${adm}) WITH CHECK (${adm});
+    REVOKE ALL ON catalog_file_chunks FROM ${APP_ROLE};
+    GRANT SELECT, INSERT, DELETE ON catalog_file_chunks TO ${APP_ROLE};
+  `);
+  return { tables: "catalog_file_chunks" };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -1181,6 +1201,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "016_catalog_blobs", up: catalogBlobsTable },
   { name: "017_visitor_products_unique", up: visitorProductsUnique },
   { name: "018_catalog_blob_parts", up: catalogBlobPartsTable },
+  { name: "019_catalog_file_chunks", up: catalogFileChunksTable },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);

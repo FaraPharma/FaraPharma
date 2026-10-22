@@ -544,3 +544,14 @@ export const catalogBlobParts = pgTable(
   },
   (t) => [uniqueIndex("catalog_blob_parts_pk").on(t.fileKey, t.part)]
 );
+
+/** فایل‌های کاتالوگ: base64 در ستون text، قطعه‌های کوچک (۶۴KB متن). بدون bytea. فقط با نقش سیستم. */
+export const catalogFileChunks = pgTable(
+  "catalog_file_chunks",
+  {
+    fileKey: text("file_key").notNull(),
+    part: integer("part").notNull(),
+    b64: text("b64").notNull(),
+  },
+  (t) => [uniqueIndex("catalog_file_chunks_pk").on(t.fileKey, t.part)]
+);
