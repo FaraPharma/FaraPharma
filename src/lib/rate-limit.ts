@@ -6,6 +6,7 @@ import { eq, sql } from "drizzle-orm";
 import { withAuthCtx, withSystemRole } from "@/db";
 import { loginAttempts, rateLimits } from "@/db/schema";
 import { getAuthSecret } from "@/lib/config";
+import { recordError } from "@/lib/error-log";
 
 const MAX_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
@@ -121,9 +122,16 @@ const minutesLeft = (until: Date, nowMs: number) => Math.max(1, Math.ceil((until
 /** فقط وضعیت قفل (بدون تغییر شمارنده). nowMs برای آزمون خودکار قابل تزریق است */
 export async function checkIpLock(bucket: IpBucket, ip: string, nowMs: number = Date.now()): Promise<IpCheck> {
   const key = await rateLimitKey(bucket, ip);
-  const rows = await withAuthCtx({ rlKeys: [key] }, (tx) =>
-    tx.select({ lockedUntil: rateLimits.lockedUntil }).from(rateLimits).where(eq(rateLimits.key, key)).limit(1)
-  );
+  let rows: { lockedUntil: Date | string | null }[];
+  try {
+    rows = await withAuthCtx({ rlKeys: [key] }, (tx) =>
+      tx.select({ lockedUntil: rateLimits.lockedUntil }).from(rateLimits).where(eq(rateLimits.key, key)).limit(1)
+    );
+  } catch (e) {
+    // «بسته»: خطا پرت می‌شود تا درخواست رد شود، نه اینکه بی‌صدا آزاد بماند
+    await recordError(`rate-limit.checkIpLock(${bucket})`, e);
+    throw e;
+  }
   const lu = rows[0]?.lockedUntil ? new Date(rows[0].lockedUntil) : null;
   if (lu && lu.getTime() > nowMs) return { locked: true, retryAfterMin: minutesLeft(lu, nowMs) };
   return { locked: false };
@@ -134,13 +142,31 @@ export async function recordIpAttempt(bucket: IpBucket, ip: string, nowMs: numbe
   const rule = IP_RULES[bucket];
   const key = await rateLimitKey(bucket, ip);
   const now = new Date(nowMs);
-  const out = await withAuthCtx({ rlKeys: [key] }, async (tx) => {
+  let out: IpCheck;
+  try {
+    out = await recordIpAttemptTx(bucket, key, rule, now, nowMs);
+  } catch (e) {
+    await recordError(`rate-limit.recordIpAttempt(${bucket})`, e);
+    throw e; // بسته: ثبت ناموفق = درخواست ناموفق
+  }
+  return afterRecord(out);
+}
+
+async function recordIpAttemptTx(
+  bucket: IpBucket,
+  key: string,
+  rule: { max: number; windowMs: number; lockMs: number },
+  now: Date,
+  nowMs: number
+): Promise<IpCheck> {
+  return withAuthCtx({ rlKeys: [key] }, async (tx) => {
     await tx.execute(
       sql`INSERT INTO rate_limits (key, bucket, count, window_start) VALUES (${key}, ${bucket}, 0, ${now.toISOString()}::timestamptz) ON CONFLICT (key) DO NOTHING`
     );
     const rows = await tx.select().from(rateLimits).where(eq(rateLimits.key, key)).for("update").limit(1);
     const rec = rows[0];
-    if (!rec) return { locked: false } as IpCheck;
+    // قبلاً اینجا بی‌صدا «قفل نیست» برمی‌گشت؛ ردیف باید بعد از درج دیده شود، وگرنه خطا (بسته)
+    if (!rec) throw new Error(`rate_limits: ردیف ${bucket} بعد از درج دیده نشد (RLS یا app.rl_keys؟)`);
     const lockedUntil = rec.lockedUntil ? new Date(rec.lockedUntil) : null;
     if (lockedUntil && lockedUntil.getTime() > nowMs) {
       return { locked: true, retryAfterMin: minutesLeft(lockedUntil, nowMs) } as IpCheck; // قفل فعال را تمدید نمی‌کنیم
@@ -148,12 +174,17 @@ export async function recordIpAttempt(bucket: IpBucket, ip: string, nowMs: numbe
     const expired = !!lockedUntil || new Date(rec.windowStart).getTime() <= nowMs - rule.windowMs;
     const count = expired ? 1 : rec.count + 1;
     const newLock = count >= rule.max ? new Date(nowMs + rule.lockMs) : null;
-    await tx
+    const upd = await tx
       .update(rateLimits)
       .set({ count, windowStart: expired ? now : rec.windowStart, lockedUntil: newLock })
-      .where(eq(rateLimits.key, key));
+      .where(eq(rateLimits.key, key))
+      .returning({ key: rateLimits.key });
+    if (upd.length !== 1) throw new Error(`rate_limits: به‌روزرسانی شمارنده ${bucket} اثر نکرد`);
     return newLock ? ({ locked: true, retryAfterMin: minutesLeft(newLock, nowMs) } as IpCheck) : ({ locked: false } as IpCheck);
   });
+}
+
+async function afterRecord(out: IpCheck): Promise<IpCheck> {
   // پاک‌سازی تصادفی ردیف‌های قدیمی (حدود ۲٪ درخواست‌ها)
   if (Math.random() < 0.02) {
     try {

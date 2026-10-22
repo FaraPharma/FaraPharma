@@ -1,6 +1,6 @@
 import { and, asc, eq, gte, lt } from "drizzle-orm";
 import { withSystemRole } from "@/db";
-import { catalogBlobParts } from "@/db/schema";
+import { catalogFileChunks } from "@/db/schema";
 import { AwsClient } from "aws4fetch";
 
 /**
@@ -21,8 +21,21 @@ const S3_CONFIGURED =
   !!process.env.S3_ACCESS_KEY &&
   !!process.env.S3_SECRET_KEY;
 
-const CHUNK = 256 * 1024;
-const READ_BATCH = 8;
+const CHUNK = 48 * 1024; // ۴۸KB خام = ۶۴KB base64
+const READ_BATCH = 16;
+
+function b64enc(u: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode(...u.subarray(i, i + 8192));
+  return btoa(s);
+}
+
+function b64dec(b: string): Uint8Array {
+  const s = atob(b);
+  const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}
 
 let s3: AwsClient | null = null;
 
@@ -59,10 +72,10 @@ export const storage: StorageAdapter = {
       if (!res.ok) throw new Error(`S3 put failed: ${res.status}`);
       return;
     }
-    // قطعه‌های کوچک در یک تراکنش: یک بسته‌ی چندمگابایتی روی اتصال Workers قطع می‌شد
+    // base64 در ستون text، قطعه‌های ۴۸KB (= ۶۴KB متن) در یک تراکنش؛ بدون bytea
     await withSystemRole(async (tx) => {
       for (let i = 0, off = 0; off < body.length || i === 0; i++, off += CHUNK) {
-        await tx.insert(catalogBlobParts).values({ fileKey: key, part: i, data: body.subarray(off, off + CHUNK) });
+        await tx.insert(catalogFileChunks).values({ fileKey: key, part: i, b64: b64enc(body.subarray(off, off + CHUNK)) });
       }
     });
   },
@@ -77,12 +90,12 @@ export const storage: StorageAdapter = {
     for (let from = 0; ; from += READ_BATCH) {
       const rows = await withSystemRole((tx) =>
         tx
-          .select({ data: catalogBlobParts.data })
-          .from(catalogBlobParts)
-          .where(and(eq(catalogBlobParts.fileKey, key), gte(catalogBlobParts.part, from), lt(catalogBlobParts.part, from + READ_BATCH)))
-          .orderBy(asc(catalogBlobParts.part))
+          .select({ b64: catalogFileChunks.b64 })
+          .from(catalogFileChunks)
+          .where(and(eq(catalogFileChunks.fileKey, key), gte(catalogFileChunks.part, from), lt(catalogFileChunks.part, from + READ_BATCH)))
+          .orderBy(asc(catalogFileChunks.part))
       );
-      parts.push(...rows.map((r) => r.data));
+      parts.push(...rows.map((r) => b64dec(r.b64)));
       if (rows.length < READ_BATCH) break;
     }
     if (parts.length === 0) return null;
