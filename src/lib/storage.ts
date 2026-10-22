@@ -26,6 +26,7 @@ const S3_CONFIGURED =
 const CHUNK = 6 * 1024;
 const ROWS_PER_INSERT = 2;
 const READ_BATCH = 8;
+const BATCH_STATEMENTS = 40; // ≈ ۶۴۰KB در هر تراکنش
 export const STORAGE_INFO = { chunkBytes: CHUNK, b64Chars: (CHUNK / 3) * 4, rowsPerInsert: ROWS_PER_INSERT, readBatch: READ_BATCH };
 
 function b64enc(u: Uint8Array): string {
@@ -76,17 +77,35 @@ export const storage: StorageAdapter = {
       if (!res.ok) throw new Error(`S3 put failed: ${res.status}`);
       return;
     }
-    // base64 در ستون text؛ هر INSERT حداکثر ROWS_PER_INSERT قطعه‌ی کوچک؛ همه در یک تراکنش
-    await withSystemRole(async (tx) => {
-      const total = Math.max(1, Math.ceil(body.length / CHUNK));
-      for (let i = 0; i < total; i += ROWS_PER_INSERT) {
-        const rows = [];
-        for (let j = i; j < Math.min(i + ROWS_PER_INSERT, total); j++) {
-          rows.push({ fileKey: key, part: j, b64: b64enc(body.subarray(j * CHUNK, (j + 1) * CHUNK)) });
+    // base64 در ستون text؛ هر INSERT حداکثر ROWS_PER_INSERT قطعه‌ی کوچک.
+    // چند تراکنش کوتاه (هر کدام BATCH_STATEMENTS دستور) به‌جای یک تراکنش بلند: مهلت ۲۵ثانیه‌ی Pool هر درخواست
+    // (pool.ts) نباید وسط یک تراکنش بلند برسد؛ هر دسته در صورت خطای «pool ended» یک بار دوباره امتحان می‌شود.
+    const total = Math.max(1, Math.ceil(body.length / CHUNK));
+    const batchParts = ROWS_PER_INSERT * BATCH_STATEMENTS;
+    try {
+      for (let start = 0; start < total; start += batchParts) {
+        const writeBatch = () =>
+          withSystemRole(async (tx) => {
+            for (let i = start; i < Math.min(start + batchParts, total); i += ROWS_PER_INSERT) {
+              const rows = [];
+              for (let j = i; j < Math.min(i + ROWS_PER_INSERT, total); j++) {
+                rows.push({ fileKey: key, part: j, b64: b64enc(body.subarray(j * CHUNK, (j + 1) * CHUNK)) });
+              }
+              await tx.insert(catalogFileChunks).values(rows);
+            }
+          });
+        try {
+          await writeBatch();
+        } catch (e) {
+          if (!/pool after calling end/i.test(e instanceof Error ? e.message : String(e))) throw e;
+          await writeBatch(); // دسته با rollback کامل برگشته؛ تکرارش بی‌خطر است
         }
-        await tx.insert(catalogFileChunks).values(rows);
       }
-    });
+    } catch (e) {
+      // قطعه‌های نیمه‌کاره‌ی این کلید باقی نماند
+      await withSystemRole((tx) => tx.delete(catalogFileChunks).where(eq(catalogFileChunks.fileKey, key))).catch(() => undefined);
+      throw e;
+    }
   },
 
   async get(key) {
