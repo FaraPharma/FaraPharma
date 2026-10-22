@@ -11,7 +11,8 @@ import { recordError } from "@/lib/error-log";
 
 export const dynamic = "force-dynamic";
 
-const MAX_PDF_BYTES = 15 * 1024 * 1024;
+// ذخیره‌ی دیتابیسی روی Workers حدود ۲۵۰–۳۰۰KB/s است؛ ۵MB ≈ ۲۰ تا ۲۵ ثانیه (S3/R2 تنظیم شد، سقف قابل افزایش است)
+const MAX_PDF_BYTES = 5 * 1024 * 1024;
 
 const MIME_BY_EXT: Record<string, string> = {
   pdf: "application/pdf",
@@ -37,7 +38,7 @@ export async function POST(
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > MAX_PDF_BYTES) {
       return NextResponse.json(
-        { error: "حجم فایل بیشتر از ۱۵ مگابایت است" },
+        { error: "حجم فایل بیشتر از ۵ مگابایت است" },
         { status: 413 }
       );
     }
@@ -75,7 +76,7 @@ export async function POST(
     }
     if (buf.length > MAX_PDF_BYTES) {
       return NextResponse.json(
-        { error: "حجم فایل بیشتر از ۱۵ مگابایت است" },
+        { error: "حجم فایل بیشتر از ۵ مگابایت است" },
         { status: 413 }
       );
     }
