@@ -31,6 +31,9 @@ export interface ListImportResult extends ActionResult {
   history?: number;
 }
 
+// ستونِ جدول visitor_products با پیشوند نام جدول (برای جلوگیری از ابهام با excluded)
+const vp = (col: string) => sql.raw(`"visitor_products"."${col}"`);
+
 const MAX_ROWS = 3000;
 const NAME_BATCH = 120; // هر دستور حدود ≤۱۶KB (محدودیت اتصال Workers)
 const ROW_BATCH = 20;
@@ -232,19 +235,20 @@ export async function importVisitorListAction(input: {
           .values(batch)
           .onConflictDoUpdate({
             target: [visitorProducts.tenantId, visitorProducts.visitorId, visitorProducts.productId],
+            // در SET، ستون‌های جدول بدون پیشوند «code» و … با excluded مبهم می‌شوند؛ پس همه با نام جدول
             set: {
-              price: sql`COALESCE(excluded.price, ${visitorProducts.price})`,
-              stock: sql`CASE WHEN excluded.qty IS NULL THEN ${visitorProducts.stock} ELSE excluded.stock END`,
-              cashDiscountPct: sql`CASE WHEN excluded.cash_discount_pct > 0 THEN excluded.cash_discount_pct ELSE ${visitorProducts.cashDiscountPct} END`,
-              checkDays: sql`CASE WHEN excluded.check_days > 0 THEN excluded.check_days ELSE ${visitorProducts.checkDays} END`,
-              offer: sql`COALESCE(excluded.offer, ${visitorProducts.offer})`,
-              code: sql`COALESCE(excluded.code, ${visitorProducts.code})`,
-              warehouse: sql`COALESCE(excluded.warehouse, ${visitorProducts.warehouse})`,
-              unit: sql`COALESCE(excluded.unit, ${visitorProducts.unit})`,
-              qty: sql`COALESCE(excluded.qty, ${visitorProducts.qty})`,
-              amount: sql`COALESCE(excluded.amount, ${visitorProducts.amount})`,
+              price: sql`COALESCE(excluded.price, ${vp("price")})`,
+              stock: sql`CASE WHEN excluded.qty IS NULL THEN ${vp("stock")} ELSE excluded.stock END`,
+              cashDiscountPct: sql`CASE WHEN excluded.cash_discount_pct > 0 THEN excluded.cash_discount_pct ELSE ${vp("cash_discount_pct")} END`,
+              checkDays: sql`CASE WHEN excluded.check_days > 0 THEN excluded.check_days ELSE ${vp("check_days")} END`,
+              offer: sql`COALESCE(excluded.offer, ${vp("offer")})`,
+              code: sql`COALESCE(excluded.code, ${vp("code")})`,
+              warehouse: sql`COALESCE(excluded.warehouse, ${vp("warehouse")})`,
+              unit: sql`COALESCE(excluded.unit, ${vp("unit")})`,
+              qty: sql`COALESCE(excluded.qty, ${vp("qty")})`,
+              amount: sql`COALESCE(excluded.amount, ${vp("amount")})`,
               rawName: sql`excluded.raw_name`,
-              extra: sql`COALESCE(${visitorProducts.extra}, '{}'::jsonb) || COALESCE(excluded.extra, '{}'::jsonb)`,
+              extra: sql`COALESCE(${vp("extra")}, '{}'::jsonb) || COALESCE(excluded.extra, '{}'::jsonb)`,
               sourceFileId: sql`excluded.source_file_id`,
               lastImportId: sql`excluded.last_import_id`,
               updatedAt: new Date(),
