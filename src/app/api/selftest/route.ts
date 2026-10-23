@@ -1475,7 +1475,7 @@ export async function GET(request: NextRequest) {
             const same = !!back && back.length === size && back.every((b, i) => b === data[i]);
             const missing = (await storage.get(`selftest/none-${stamp}.bin`)) === null;
             const pass = same && missing;
-            return { pass, detail: pass ? `۴ مگابایت عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ poolRev=${POOL_REV}؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B poolRev=${POOL_REV}` };
+            return { pass, detail: pass ? `۴ مگابایت عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT و ۴ INSERT در هر تراکنش؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ توان نوشتن ${(4 / (tw / 1000)).toFixed(2)}MB/s، سقف عملیِ پیشنهادی برای ≈۱۰ثانیه آپلود: ${Math.max(1, Math.floor((4 / (tw / 1000)) * 10))}MB؛ poolRev=${POOL_REV}؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B poolRev=${POOL_REV}` };
           } catch (e) {
             // تشخیص: کدام اندازه‌ی متن روی اتصال Workers می‌گذرد؟ (هر اندازه در تراکنش جدا)
             const probe: string[] = [];
