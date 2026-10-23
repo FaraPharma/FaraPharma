@@ -1539,7 +1539,7 @@ export async function GET(request: NextRequest) {
             const r1 = await importVisitorListAction({ visitorId: vid, rows: first });
             k.firstOk = r1.ok === true && r1.newProducts === 45 && r1.created === 45 && r1.updated === 0 && r1.invalid === 1;
             const c1 = await pool.query("SELECT count(*)::int AS n FROM visitor_products WHERE visitor_id = $1", [vid]);
-            const row3 = (await pool.query("SELECT code, warehouse, unit, qty::text AS qty, amount, extra FROM visitor_products vp JOIN products p ON p.id = vp.product_id WHERE vp.visitor_id = $1 AND p.name = $2", [vid, `${pfx}3`])).rows[0];
+            const row3 = (await pool.query("SELECT vp.code AS code, vp.warehouse AS warehouse, vp.unit AS unit, vp.qty::text AS qty, vp.amount AS amount, vp.extra AS extra FROM visitor_products vp JOIN products p ON p.id = vp.product_id WHERE vp.visitor_id = $1 AND p.name = $2", [vid, `${pfx}3`])).rows[0];
             k.countAndColumns = c1.rows[0].n === 45 && row3?.code === "C3" && row3?.unit === "عدد" && row3?.qty === "13" && Number(row3?.amount) === 13 * 1003 && row3?.extra?.["ستون ناشناخته"] === "v3";
             // ورود دوم: ردیف ۰ حذف، قیمت ردیف ۱ تغییر، مانده‌ی ردیف ۲ صفر
             const second = Array.from({ length: 45 }, (_, i) => i).filter((i) => i !== 0).map((i) => mk(i, i === 1 ? { price: 5000, amount: 5000 * 11 } : i === 2 ? { qty: 0, amount: 0 } : {}));
