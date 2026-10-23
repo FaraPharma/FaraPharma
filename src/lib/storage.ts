@@ -23,11 +23,25 @@ const S3_CONFIGURED =
 
 // روی Workers یک بسته‌ی نوشتنِ بزرگ (تک‌ردیف > حدود ۳۲–۶۴KB) اتصال را می‌بندد (آزمون ۳۸: ۱۶KB ok، ۶۴KB FAIL).
 // پس: قطعه‌ی ۶KB خام = ۸KB base64، دو ردیف در هر INSERT (≈۱۶KB). هر تراکنش یک اتصال؛ همه‌ی قطعه‌ها پشت‌سرهم.
-const CHUNK = 6 * 1024;
-const ROWS_PER_INSERT = 2;
-const READ_BATCH = 8;
-const BATCH_STATEMENTS = 40; // ≈ ۶۴۰KB در هر تراکنش
-export const STORAGE_INFO = { chunkBytes: CHUNK, b64Chars: (CHUNK / 3) * 4, rowsPerInsert: ROWS_PER_INSERT, readBatch: READ_BATCH };
+// قطعه‌ی ۱۲KB خام = ۱۶KB base64 (تک‌پارامترِ بزرگ‌تر از ≈۳۲–۶۴KB روی اتصال Workers قطع می‌شد).
+// برای کم‌کردن رفت‌وبرگشت، چند ردیف در یک INSERT و چند INSERT در یک تراکنشِ کوچک؛ اگر دستور بزرگ جواب نداد،
+// خودکار پله‌به‌پله کوچک‌تر می‌شود (۸ → ۴ → ۲ → ۱ ردیف) و پله‌ی جواب‌دهنده تا پایان عمر Worker یادآوری می‌شود.
+const CHUNK = 12 * 1024;
+const WRITE_LADDER = [8, 4, 2, 1];
+const READ_LADDER = [32, 16, 8, 4, 2, 1];
+const STATEMENTS_PER_TX = 4;
+let writeStep = 0;
+let readStep = 0;
+export const STORAGE_INFO = {
+  chunkBytes: CHUNK,
+  b64Chars: (CHUNK / 3) * 4,
+  get rowsPerInsert() {
+    return WRITE_LADDER[writeStep];
+  },
+  get readBatch() {
+    return READ_LADDER[readStep];
+  },
+};
 
 function b64enc(u: Uint8Array): string {
   let s = "";
@@ -77,28 +91,26 @@ export const storage: StorageAdapter = {
       if (!res.ok) throw new Error(`S3 put failed: ${res.status}`);
       return;
     }
-    // base64 در ستون text؛ هر INSERT حداکثر ROWS_PER_INSERT قطعه‌ی کوچک.
-    // چند تراکنش کوتاه (هر کدام BATCH_STATEMENTS دستور) به‌جای یک تراکنش بلند: مهلت ۲۵ثانیه‌ی Pool هر درخواست
-    // (pool.ts) نباید وسط یک تراکنش بلند برسد؛ هر دسته در صورت خطای «pool ended» یک بار دوباره امتحان می‌شود.
     const total = Math.max(1, Math.ceil(body.length / CHUNK));
-    const batchParts = ROWS_PER_INSERT * BATCH_STATEMENTS;
     try {
-      for (let start = 0; start < total; start += batchParts) {
-        const writeBatch = () =>
-          withSystemRole(async (tx) => {
-            for (let i = start; i < Math.min(start + batchParts, total); i += ROWS_PER_INSERT) {
+      for (let start = 0; start < total; ) {
+        const rpi = WRITE_LADDER[writeStep];
+        const end = Math.min(start + rpi * STATEMENTS_PER_TX, total);
+        try {
+          await withSystemRole(async (tx) => {
+            for (let i = start; i < end; i += rpi) {
               const rows = [];
-              for (let j = i; j < Math.min(i + ROWS_PER_INSERT, total); j++) {
+              for (let j = i; j < Math.min(i + rpi, end); j++) {
                 rows.push({ fileKey: key, part: j, b64: b64enc(body.subarray(j * CHUNK, (j + 1) * CHUNK)) });
               }
               await tx.insert(catalogFileChunks).values(rows);
             }
           });
-        try {
-          await writeBatch();
+          start = end; // این گروه کامل ثبت شد
         } catch (e) {
-          if (!/pool after calling end/i.test(e instanceof Error ? e.message : String(e))) throw e;
-          await writeBatch(); // دسته با rollback کامل برگشته؛ تکرارش بی‌خطر است
+          // گروه با rollback کامل برگشته؛ با دستورهای کوچک‌تر دوباره (بی‌خطر است)
+          if (writeStep < WRITE_LADDER.length - 1) writeStep++;
+          else throw e;
         }
       }
     } catch (e) {
@@ -107,7 +119,6 @@ export const storage: StorageAdapter = {
       throw e;
     }
   },
-
   async get(key) {
     if (S3_CONFIGURED) {
       const res = await s3Client().fetch(s3Url(key), { method: "GET" });
@@ -115,18 +126,28 @@ export const storage: StorageAdapter = {
       return new Uint8Array(await res.arrayBuffer());
     }
     const parts: Uint8Array[] = [];
-    // همه‌ی خواندن‌ها در یک تراکنش (هر تراکنش چند رفت‌وبرگشت دارد؛ جدا کردنشان کند می‌شود)
-    await withSystemRole(async (tx) => {
-      for (let from = 0; ; from += READ_BATCH) {
-        const rows = await tx
-          .select({ b64: catalogFileChunks.b64 })
-          .from(catalogFileChunks)
-          .where(and(eq(catalogFileChunks.fileKey, key), gte(catalogFileChunks.part, from), lt(catalogFileChunks.part, from + READ_BATCH)))
-          .orderBy(asc(catalogFileChunks.part));
-        for (const r of rows) parts.push(b64dec(r.b64));
-        if (rows.length < READ_BATCH) break;
+    for (let from = 0; ; ) {
+      const bs = READ_LADDER[readStep];
+      let rows: Array<{ b64: string }>;
+      try {
+        rows = await withSystemRole((tx) =>
+          tx
+            .select({ b64: catalogFileChunks.b64 })
+            .from(catalogFileChunks)
+            .where(and(eq(catalogFileChunks.fileKey, key), gte(catalogFileChunks.part, from), lt(catalogFileChunks.part, from + bs)))
+            .orderBy(asc(catalogFileChunks.part))
+        );
+      } catch (e) {
+        if (readStep < READ_LADDER.length - 1) {
+          readStep++; // پاسخ کوچک‌تر
+          continue;
+        }
+        throw e;
       }
-    });
+      for (const r of rows) parts.push(b64dec(r.b64));
+      if (rows.length < bs) break;
+      from += bs;
+    }
     if (parts.length === 0) return null;
     const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
     let pos = 0;
