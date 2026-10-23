@@ -11,7 +11,7 @@ import { recordError } from "@/lib/error-log";
 
 export const dynamic = "force-dynamic";
 
-// ذخیره‌ی دیتابیسی روی Workers حدود ۲۵۰–۳۰۰KB/s است؛ ۵MB ≈ ۲۰ تا ۲۵ ثانیه (S3/R2 تنظیم شد، سقف قابل افزایش است)
+// ذخیره‌ی دیتابیسی با ۴ اتصال هم‌زمان؛ سقف حجم در storage.ts (بدون S3: ۳MB، با S3/R2: ۱۰MB)
 const MAX_PDF_BYTES = MAX_CATALOG_BYTES; // همان سقفی که آزمون ۳۸ می‌سنجد
 
 const MIME_BY_EXT: Record<string, string> = {
