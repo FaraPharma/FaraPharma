@@ -9,10 +9,10 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
  */
 
 /** نشانه‌ی نسخه‌ی دیپلوی‌شده (آزمون ۳۸ آن را گزارش می‌کند تا معلوم باشد این فایل زنده است) */
-export const POOL_REV = "ending-check-1";
+export const POOL_REV = "ending-check-2";
 
 const POOL_OPTIONS = {
-  max: 1,
+  max: 4, // اتصال‌ها تنبل ساخته می‌شوند؛ درخواست عادی فقط ۱ اتصال می‌گیرد، ذخیره‌ی فایل تا ۴ تراکنش هم‌زمان
   idleTimeoutMillis: 1_000, // اتصال بیکار بعد از ۱ ثانیه بسته می‌شود
   connectionTimeoutMillis: 10_000, // انتظار برای اتصال/نوبت
   query_timeout: 15_000,
