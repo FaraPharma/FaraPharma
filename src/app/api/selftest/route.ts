@@ -1555,7 +1555,7 @@ export async function GET(request: NextRequest) {
             dbg.item1_price = { expected: 5000, actual: by[`${pfx}1`]?.price };
             k.item0Out = by[`${pfx}0`]?.stock === "out";
             k.item2Out = by[`${pfx}2`]?.stock === "out";
-            k.item1Price = by[`${pfx}1`]?.price === 5000;
+            k.item1Price = Number(by[`${pfx}1`]?.price) === 5000;
             const h = await pool.query("SELECT count(*)::int AS n FROM visitor_product_history WHERE visitor_id = $1", [vid]);
             const c2 = await pool.query("SELECT count(*)::int AS n FROM visitor_products WHERE visitor_id = $1", [vid]);
             k.historyAndNoDup = h.rows[0].n >= 2 && c2.rows[0].n === 45;
