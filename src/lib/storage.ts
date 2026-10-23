@@ -27,14 +27,17 @@ const S3_CONFIGURED =
 // برای کم‌کردن رفت‌وبرگشت، چند ردیف در یک INSERT و چند INSERT در یک تراکنشِ کوچک؛ اگر دستور بزرگ جواب نداد،
 // خودکار پله‌به‌پله کوچک‌تر می‌شود (۸ → ۴ → ۲ → ۱ ردیف) و پله‌ی جواب‌دهنده تا پایان عمر Worker یادآوری می‌شود.
 const CHUNK = 12 * 1024;
-const WRITE_LADDER = [8, 4, 2, 1];
+// اندازه‌گیری روی Workers: ۸ و ۴ ردیف (≈۶۴ و ۱۲۸KB در یک دستور) اتصال را می‌بندد، ۲ ردیف (≈۳۲KB) جواب می‌دهد؛
+// پس پله‌ی اول همان ۲ است (بدون تلاش شکست‌خورده‌ی هر Worker تازه).
+const WRITE_LADDER = [2, 1];
 const READ_LADDER = [32, 16, 8, 4, 2, 1];
-const STATEMENTS_PER_TX = 4;
+const STATEMENTS_PER_TX = 16; // هر تراکنش ≈۵۱۲KB؛ سربار BEGIN/COMMIT کمتر
 let writeStep = 0;
 let readStep = 0;
 export const STORAGE_INFO = {
   chunkBytes: CHUNK,
   b64Chars: (CHUNK / 3) * 4,
+  stmtsPerTx: STATEMENTS_PER_TX,
   get rowsPerInsert() {
     return WRITE_LADDER[writeStep];
   },
