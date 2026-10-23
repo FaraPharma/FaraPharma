@@ -1461,7 +1461,7 @@ export async function GET(request: NextRequest) {
         });
 
         // ---------- ۳۸) ذخیره‌ی فایل بزرگ در مخزن (روی همین Workers): نوشتن و خواندن بدون تغییر ----------
-        await test("۳۸) مخزن فایل: فایلِ هم‌اندازه‌ی سقف آپلود (۲ مگابایت) نوشته و بدون تغییر خوانده می‌شود", async () => {
+        await test("۳۸) مخزن فایل: فایلِ هم‌اندازه‌ی سقف آپلود (سقف فعلی) نوشته و بدون تغییر خوانده می‌شود", async () => {
           const key = `selftest/${stamp}.bin`;
           const size = MAX_CATALOG_BYTES - 123; // بزرگ‌ترین فایلی که مسیر آپلود می‌پذیرد
           const data = new Uint8Array(size);
@@ -1491,6 +1491,7 @@ export async function GET(request: NextRequest) {
             await recordError("selftest/38 storage", new Error(msg));
             return { pass: false, detail: msg };
           } finally {
+            await storage.delete(key).catch(() => undefined);
             await pool.query("DELETE FROM catalog_file_chunks WHERE file_key = $1 OR file_key = $2", [key, `selftest/probe-${stamp}`]);
           }
         });
