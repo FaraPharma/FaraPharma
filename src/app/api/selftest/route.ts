@@ -1475,7 +1475,7 @@ export async function GET(request: NextRequest) {
             const same = !!back && back.length === size && back.every((b, i) => b === data[i]);
             const missing = (await storage.get(`selftest/none-${stamp}.bin`)) === null;
             const pass = same && missing;
-            return { pass, detail: pass ? `۴ مگابایت عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT و ۴ INSERT در هر تراکنش؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ توان نوشتن ${(4 / (tw / 1000)).toFixed(2)}MB/s، سقف عملیِ پیشنهادی برای ≈۱۰ثانیه آپلود: ${Math.max(1, Math.floor((4 / (tw / 1000)) * 10))}MB؛ poolRev=${POOL_REV}؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B poolRev=${POOL_REV}` };
+            return { pass, detail: pass ? `۴ مگابایت عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT و ${STORAGE_INFO.stmtsPerTx} INSERT در هر تراکنش؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ توان نوشتن ${(4 / (tw / 1000)).toFixed(2)}MB/s، سقف عملیِ پیشنهادی برای ≈۱۰ثانیه آپلود: ${Math.max(1, Math.floor((4 / (tw / 1000)) * 10))}MB؛ poolRev=${POOL_REV}؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B poolRev=${POOL_REV}` };
           } catch (e) {
             // تشخیص: کدام اندازه‌ی متن روی اتصال Workers می‌گذرد؟ (هر اندازه در تراکنش جدا)
             const probe: string[] = [];
@@ -1552,10 +1552,10 @@ export async function GET(request: NextRequest) {
             const by = Object.fromEntries(st.rows.map((x) => [x.name, x]));
             dbg.item0_stock = { expected: "out", actual: by[`${pfx}0`]?.stock };
             dbg.item2_stock = { expected: "out", actual: by[`${pfx}2`]?.stock };
-            dbg.item1_price = { expected: 5000, actual: by[`${pfx}1`]?.price };
+            dbg.item1_price = { expected: 5000, actual: by[`${pfx}1`]?.price, actualType: typeof by[`${pfx}1`]?.price };
             k.item0Out = by[`${pfx}0`]?.stock === "out";
             k.item2Out = by[`${pfx}2`]?.stock === "out";
-            k.item1Price = Number(by[`${pfx}1`]?.price) === 5000;
+            k.item1Price = Number(by[`${pfx}1`]?.price) === 5000; // ستون در دیتابیس عددی است و pg آن را رشته برمی‌گرداند
             const h = await pool.query("SELECT count(*)::int AS n FROM visitor_product_history WHERE visitor_id = $1", [vid]);
             const c2 = await pool.query("SELECT count(*)::int AS n FROM visitor_products WHERE visitor_id = $1", [vid]);
             k.historyAndNoDup = h.rows[0].n >= 2 && c2.rows[0].n === 45;
