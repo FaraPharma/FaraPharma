@@ -31,9 +31,6 @@ export interface ListImportResult extends ActionResult {
   history?: number;
 }
 
-// ستونِ جدول visitor_products با پیشوند نام جدول (برای جلوگیری از ابهام با excluded)
-const vp = (col: string) => sql.raw(`"visitor_products"."${col}"`);
-
 const MAX_ROWS = 3000;
 const NAME_BATCH = 120; // هر دستور حدود ≤۱۶KB (محدودیت اتصال Workers)
 const ROW_BATCH = 20;
@@ -161,6 +158,12 @@ export async function importVisitorListAction(input: {
           checkDays: visitorProducts.checkDays,
           offer: visitorProducts.offer,
           validUntil: visitorProducts.validUntil,
+          code: visitorProducts.code,
+          warehouse: visitorProducts.warehouse,
+          unit: visitorProducts.unit,
+          qty: visitorProducts.qty,
+          amount: visitorProducts.amount,
+          extra: visitorProducts.extra,
         })
         .from(visitorProducts)
         .where(and(eq(visitorProducts.tenantId, ctx.tenantId), eq(visitorProducts.visitorId, input.visitorId)));
@@ -202,28 +205,32 @@ export async function importVisitorListAction(input: {
       }
       for (let i = 0; i < hist.length; i += ROW_BATCH) await tx.insert(visitorProductHistory).values(hist.slice(i, i + ROW_BATCH));
 
-      // ۳) ثبت/به‌روزرسانی (فقط مقدارهای تازه روی قبلی می‌نشیند؛ خالی، مقدار قبلی را پاک نمی‌کند)
+      // ۳) ثبت/به‌روزرسانی. مقدار نهایی هر ردیف (تازه روی قبلی؛ خالی، مقدار قبلی را پاک نمی‌کند) همین‌جا ساخته
+      //    می‌شود و SQL فقط همان را می‌نویسد؛ پس به CASE/COALESCE درون ON CONFLICT وابسته نیستیم.
       for (let i = 0; i < rows.length; i += ROW_BATCH) {
         const batch = rows.slice(i, i + ROW_BATCH).flatMap((r) => {
           const pid = idByName.get(r.name);
           if (!pid) return [];
+          const p = prev.get(pid);
+          const qtyFinal = r.qty !== null ? String(r.qty) : p?.qty ?? null;
+          const mergedExtra = r.extra || p?.extra ? { ...(p?.extra ?? {}), ...(r.extra ?? {}) } : null;
           return [
             {
               tenantId: ctx.tenantId,
               visitorId: input.visitorId,
               productId: pid,
-              stock: newStock(r) ?? "in",
-              cashDiscountPct: r.discountPct,
-              checkDays: r.checkDays,
-              price: r.price,
-              offer: r.offer,
-              code: r.code,
-              warehouse: r.warehouse,
-              unit: r.unit,
-              qty: r.qty === null ? null : String(r.qty),
-              amount: r.amount,
+              stock: newStock(r) ?? p?.stock ?? "in",
+              cashDiscountPct: r.discountPct > 0 ? r.discountPct : p?.cashDiscountPct ?? 0,
+              checkDays: r.checkDays > 0 ? r.checkDays : p?.checkDays ?? 0,
+              price: r.price ?? p?.price ?? null,
+              offer: r.offer ?? p?.offer ?? null,
+              code: r.code ?? p?.code ?? null,
+              warehouse: r.warehouse ?? p?.warehouse ?? null,
+              unit: r.unit ?? p?.unit ?? null,
+              qty: qtyFinal,
+              amount: r.amount ?? p?.amount ?? null,
               rawName: r.name,
-              extra: r.extra,
+              extra: mergedExtra,
               sourceFileId: fileId,
               lastImportId: importId,
             },
@@ -235,20 +242,19 @@ export async function importVisitorListAction(input: {
           .values(batch)
           .onConflictDoUpdate({
             target: [visitorProducts.tenantId, visitorProducts.visitorId, visitorProducts.productId],
-            // در SET، ستون‌های جدول بدون پیشوند «code» و … با excluded مبهم می‌شوند؛ پس همه با نام جدول
             set: {
-              price: sql`COALESCE(excluded.price, ${vp("price")})`,
-              stock: sql`CASE WHEN excluded.qty IS NULL THEN ${vp("stock")} ELSE excluded.stock END`,
-              cashDiscountPct: sql`CASE WHEN excluded.cash_discount_pct > 0 THEN excluded.cash_discount_pct ELSE ${vp("cash_discount_pct")} END`,
-              checkDays: sql`CASE WHEN excluded.check_days > 0 THEN excluded.check_days ELSE ${vp("check_days")} END`,
-              offer: sql`COALESCE(excluded.offer, ${vp("offer")})`,
-              code: sql`COALESCE(excluded.code, ${vp("code")})`,
-              warehouse: sql`COALESCE(excluded.warehouse, ${vp("warehouse")})`,
-              unit: sql`COALESCE(excluded.unit, ${vp("unit")})`,
-              qty: sql`COALESCE(excluded.qty, ${vp("qty")})`,
-              amount: sql`COALESCE(excluded.amount, ${vp("amount")})`,
+              price: sql`excluded.price`,
+              stock: sql`excluded.stock`,
+              cashDiscountPct: sql`excluded.cash_discount_pct`,
+              checkDays: sql`excluded.check_days`,
+              offer: sql`excluded.offer`,
+              code: sql`excluded.code`,
+              warehouse: sql`excluded.warehouse`,
+              unit: sql`excluded.unit`,
+              qty: sql`excluded.qty`,
+              amount: sql`excluded.amount`,
               rawName: sql`excluded.raw_name`,
-              extra: sql`COALESCE(${vp("extra")}, '{}'::jsonb) || COALESCE(excluded.extra, '{}'::jsonb)`,
+              extra: sql`excluded.extra`,
               sourceFileId: sql`excluded.source_file_id`,
               lastImportId: sql`excluded.last_import_id`,
               updatedAt: new Date(),
