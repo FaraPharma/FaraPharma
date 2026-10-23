@@ -33,7 +33,9 @@ const WRITE_LADDER = [2, 1];
 const READ_LADDER = [32, 16, 8, 4, 2, 1];
 const STATEMENTS_PER_TX = 16; // هر تراکنش ≈۵۱۲KB؛ سربار BEGIN/COMMIT کمتر
 /** سقف حجم فایل آپلودی (مسیر آپلود و آزمون ۳۸ هر دو از همین مقدار استفاده می‌کنند) */
-export const MAX_CATALOG_BYTES = 2 * 1024 * 1024;
+// بدون S3: ۱MB (≈۱۰ثانیه نوشتن روی دیتابیس، اندازه‌گیری آزمون ۳۸: ۰٫۱MB/s)؛ با S3/R2: ۱۰MB
+export const MAX_CATALOG_BYTES = (S3_CONFIGURED ? 10 : 1) * 1024 * 1024;
+export const MAX_CATALOG_MB = MAX_CATALOG_BYTES / (1024 * 1024);
 let writeStep = 0;
 let readStep = 0;
 export const STORAGE_INFO = {
@@ -83,6 +85,7 @@ function s3Url(key: string): string {
 export interface StorageAdapter {
   put(key: string, body: Uint8Array, contentType: string): Promise<void>;
   get(key: string): Promise<Uint8Array | null>;
+  delete(key: string): Promise<void>;
 }
 
 export const storage: StorageAdapter = {
@@ -123,6 +126,13 @@ export const storage: StorageAdapter = {
       await withSystemRole((tx) => tx.delete(catalogFileChunks).where(eq(catalogFileChunks.fileKey, key))).catch(() => undefined);
       throw e;
     }
+  },
+  async delete(key) {
+    if (S3_CONFIGURED) {
+      await s3Client().fetch(s3Url(key), { method: "DELETE" }).catch(() => undefined);
+      return;
+    }
+    await withSystemRole((tx) => tx.delete(catalogFileChunks).where(eq(catalogFileChunks.fileKey, key)));
   },
   async get(key) {
     if (S3_CONFIGURED) {
