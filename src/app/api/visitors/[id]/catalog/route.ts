@@ -5,7 +5,7 @@ import { AppError, withTenant } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import { assertWritable } from "@/db/access";
 import { visitors, catalogFiles } from "@/db/schema";
-import { storage, MAX_CATALOG_BYTES } from "@/lib/storage";
+import { storage, MAX_CATALOG_BYTES, MAX_CATALOG_MB } from "@/lib/storage";
 import { logServerError } from "@/lib/log";
 import { recordError } from "@/lib/error-log";
 
@@ -38,7 +38,7 @@ export async function POST(
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (contentLength > MAX_PDF_BYTES) {
       return NextResponse.json(
-        { error: "حجم فایل بیشتر از ۲ مگابایت است؛ فایل را فشرده یا کوچک‌تر کنید" },
+        { error: `حجم فایل بیشتر از ${MAX_CATALOG_MB} مگابایت است؛ فایل را فشرده یا کوچک‌تر کنید` },
         { status: 413 }
       );
     }
@@ -76,7 +76,7 @@ export async function POST(
     }
     if (buf.length > MAX_PDF_BYTES) {
       return NextResponse.json(
-        { error: "حجم فایل بیشتر از ۲ مگابایت است؛ فایل را فشرده یا کوچک‌تر کنید" },
+        { error: `حجم فایل بیشتر از ${MAX_CATALOG_MB} مگابایت است؛ فایل را فشرده یا کوچک‌تر کنید` },
         { status: 413 }
       );
     }
