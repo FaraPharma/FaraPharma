@@ -5,14 +5,14 @@ import { AppError, withTenant } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import { assertWritable } from "@/db/access";
 import { visitors, catalogFiles } from "@/db/schema";
-import { storage } from "@/lib/storage";
+import { storage, MAX_CATALOG_BYTES } from "@/lib/storage";
 import { logServerError } from "@/lib/log";
 import { recordError } from "@/lib/error-log";
 
 export const dynamic = "force-dynamic";
 
 // ذخیره‌ی دیتابیسی روی Workers حدود ۲۵۰–۳۰۰KB/s است؛ ۵MB ≈ ۲۰ تا ۲۵ ثانیه (S3/R2 تنظیم شد، سقف قابل افزایش است)
-const MAX_PDF_BYTES = 2 * 1024 * 1024; // محافظه‌کارانه تا اندازه‌گیری آزمون ۳۸ (سقف عملی)
+const MAX_PDF_BYTES = MAX_CATALOG_BYTES; // همان سقفی که آزمون ۳۸ می‌سنجد
 
 const MIME_BY_EXT: Record<string, string> = {
   pdf: "application/pdf",
