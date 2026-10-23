@@ -30,7 +30,7 @@ import { GET as visitorsGET } from "@/app/api/visitors/route";
 import { GET as auditGET } from "@/app/api/admin/audit/route";
 import { GET as errorsGET } from "@/app/api/admin/errors/route";
 import { recordError } from "@/lib/error-log";
-import { storage, STORAGE_INFO } from "@/lib/storage";
+import { storage, MAX_CATALOG_BYTES, STORAGE_INFO } from "@/lib/storage";
 import { importVisitorListAction } from "@/actions/listImport";
 import { parseTable, visualToLogical } from "@/lib/list-import";
 import { POOL_REV } from "@/db/pool";
@@ -1461,9 +1461,9 @@ export async function GET(request: NextRequest) {
         });
 
         // ---------- ۳۸) ذخیره‌ی فایل بزرگ در مخزن (روی همین Workers): نوشتن و خواندن بدون تغییر ----------
-        await test("۳۸) مخزن فایل: ۴ مگابایت نوشته و بدون تغییر خوانده می‌شود", async () => {
+        await test("۳۸) مخزن فایل: فایلِ هم‌اندازه‌ی سقف آپلود (۲ مگابایت) نوشته و بدون تغییر خوانده می‌شود", async () => {
           const key = `selftest/${stamp}.bin`;
-          const size = 4 * 1024 * 1024 + 123;
+          const size = MAX_CATALOG_BYTES - 123; // بزرگ‌ترین فایلی که مسیر آپلود می‌پذیرد
           const data = new Uint8Array(size);
           for (let o = 0; o < size; o += 65536) crypto.getRandomValues(data.subarray(o, Math.min(o + 65536, size)));
           const t0 = Date.now();
@@ -1475,7 +1475,7 @@ export async function GET(request: NextRequest) {
             const same = !!back && back.length === size && back.every((b, i) => b === data[i]);
             const missing = (await storage.get(`selftest/none-${stamp}.bin`)) === null;
             const pass = same && missing;
-            return { pass, detail: pass ? `۴ مگابایت عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT و ${STORAGE_INFO.stmtsPerTx} INSERT در هر تراکنش؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ توان نوشتن ${(4 / (tw / 1000)).toFixed(2)}MB/s، سقف عملیِ پیشنهادی برای ≈۱۰ثانیه آپلود: ${Math.max(1, Math.floor((4 / (tw / 1000)) * 10))}MB؛ poolRev=${POOL_REV}؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B poolRev=${POOL_REV}` };
+            return { pass, detail: pass ? `فایل ${(size / 1048576).toFixed(2)} مگابایتی عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT و ${STORAGE_INFO.stmtsPerTx} INSERT در هر تراکنش؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ توان نوشتن ${(size / 1048576 / (tw / 1000)).toFixed(2)}MB/s، سقف عملیِ پیشنهادی برای ≈۱۰ثانیه آپلود: ${Math.max(1, Math.floor((size / 1048576 / (tw / 1000)) * 10))}MB؛ poolRev=${POOL_REV}؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B poolRev=${POOL_REV}` };
           } catch (e) {
             // تشخیص: کدام اندازه‌ی متن روی اتصال Workers می‌گذرد؟ (هر اندازه در تراکنش جدا)
             const probe: string[] = [];
