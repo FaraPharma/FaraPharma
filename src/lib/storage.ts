@@ -32,6 +32,8 @@ const CHUNK = 12 * 1024;
 const WRITE_LADDER = [2, 1];
 const READ_LADDER = [32, 16, 8, 4, 2, 1];
 const STATEMENTS_PER_TX = 16; // هر تراکنش ≈۵۱۲KB؛ سربار BEGIN/COMMIT کمتر
+/** سقف حجم فایل آپلودی (مسیر آپلود و آزمون ۳۸ هر دو از همین مقدار استفاده می‌کنند) */
+export const MAX_CATALOG_BYTES = 2 * 1024 * 1024;
 let writeStep = 0;
 let readStep = 0;
 export const STORAGE_INFO = {
