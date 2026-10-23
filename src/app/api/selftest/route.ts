@@ -1528,6 +1528,8 @@ export async function GET(request: NextRequest) {
           const vis = await pool.query("INSERT INTO visitors (tenant_id, name) VALUES ($1, $2) RETURNING id", [tenantB, `selftest-visitor-${stamp}`]);
           const vid = vis.rows[0].id as string;
           const k: Record<string, boolean> = {};
+          const dbg: Record<string, unknown> = {};
+          let r2info: unknown = null;
           try {
             const tokB = await signSession({ sub: tenantB, tid: tenantB, role: "owner", email: S.emailB as string });
             store.set(AUTH_COOKIE, tokB, { ...opts, httpOnly: true });
@@ -1544,10 +1546,16 @@ export async function GET(request: NextRequest) {
             // ورود دوم: ردیف ۰ حذف، قیمت ردیف ۱ تغییر، مانده‌ی ردیف ۲ صفر
             const second = Array.from({ length: 45 }, (_, i) => i).filter((i) => i !== 0).map((i) => mk(i, i === 1 ? { price: 5000, amount: 5000 * 11 } : i === 2 ? { qty: 0, amount: 0 } : {}));
             const r2 = await importVisitorListAction({ visitorId: vid, rows: second });
+            r2info = { ok: r2.ok, error: r2.error, newProducts: r2.newProducts, created: r2.created, updated: r2.updated, markedOut: r2.markedOut, history: r2.history };
             k.secondOk = r2.ok === true && r2.newProducts === 0 && r2.created === 0 && r2.updated === 44 && r2.markedOut === 1 && (r2.history ?? 0) >= 2;
             const st = await pool.query("SELECT p.name, vp.stock, vp.price FROM visitor_products vp JOIN products p ON p.id = vp.product_id WHERE vp.visitor_id = $1 AND p.name = ANY($2)", [vid, [`${pfx}0`, `${pfx}1`, `${pfx}2`]]);
             const by = Object.fromEntries(st.rows.map((x) => [x.name, x]));
-            k.statesAndPrice = by[`${pfx}0`]?.stock === "out" && by[`${pfx}2`]?.stock === "out" && by[`${pfx}1`]?.price === 5000;
+            dbg.item0_stock = { expected: "out", actual: by[`${pfx}0`]?.stock };
+            dbg.item2_stock = { expected: "out", actual: by[`${pfx}2`]?.stock };
+            dbg.item1_price = { expected: 5000, actual: by[`${pfx}1`]?.price };
+            k.item0Out = by[`${pfx}0`]?.stock === "out";
+            k.item2Out = by[`${pfx}2`]?.stock === "out";
+            k.item1Price = by[`${pfx}1`]?.price === 5000;
             const h = await pool.query("SELECT count(*)::int AS n FROM visitor_product_history WHERE visitor_id = $1", [vid]);
             const c2 = await pool.query("SELECT count(*)::int AS n FROM visitor_products WHERE visitor_id = $1", [vid]);
             k.historyAndNoDup = h.rows[0].n >= 2 && c2.rows[0].n === 45;
@@ -1558,7 +1566,7 @@ export async function GET(request: NextRequest) {
             await pool.query("DELETE FROM products WHERE tenant_id = $1 AND name LIKE $2", [tenantB, `${pfx}%`]);
           }
           const pass = Object.values(k).every(Boolean);
-          return { pass, detail: pass ? "ورود اول ۴۵ کالا ساخت (هم‌نام و نامعتبر رد شد)، ورود دوم ۴۴ را به‌روز کرد، یک کالا «ناموجود» شد، تاریخچه ثبت شد و همه‌ی ستون‌ها (کد، انبار، واحد، مانده، مبلغ، extra) ماند؛ نشست مدیر برگشت" : `ناموفق: ${JSON.stringify(k)}` };
+          return { pass, detail: pass ? "ورود اول ۴۵ کالا ساخت (هم‌نام و نامعتبر رد شد)، ورود دوم ۴۴ را به‌روز کرد، یک کالا «ناموجود» شد، تاریخچه ثبت شد و همه‌ی ستون‌ها (کد، انبار، واحد، مانده، مبلغ، extra) ماند؛ نشست مدیر برگشت" : `ناموفق: ${JSON.stringify(k)} | مقدار انتظار/واقعی: ${JSON.stringify(dbg)} | ورود دوم: ${JSON.stringify(r2info)}` };
         });
 
         // ---------- ۳۳) RLS و FORCE جدول‌های جدید ----------
