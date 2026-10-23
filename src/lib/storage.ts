@@ -31,10 +31,11 @@ const CHUNK = 12 * 1024;
 // پس پله‌ی اول همان ۲ است (بدون تلاش شکست‌خورده‌ی هر Worker تازه).
 const WRITE_LADDER = [2, 1];
 const READ_LADDER = [32, 16, 8, 4, 2, 1];
-const STATEMENTS_PER_TX = 16; // هر تراکنش ≈۵۱۲KB؛ سربار BEGIN/COMMIT کمتر
+const STATEMENTS_PER_TX = 8; // هر تراکنش ≈۲۵۶KB؛ گروه‌های کوچک‌تر = تقسیم بهتر بین اتصال‌های هم‌زمان
+const WRITE_CONCURRENCY = 4; // تراکنش‌های هم‌زمان (هر کدام یک اتصال)؛ گلوگاه رفت‌وبرگشت شبکه است، نه حجم
 /** سقف حجم فایل آپلودی (مسیر آپلود و آزمون ۳۸ هر دو از همین مقدار استفاده می‌کنند) */
-// بدون S3: ۱MB (≈۱۰ثانیه نوشتن روی دیتابیس، اندازه‌گیری آزمون ۳۸: ۰٫۱MB/s)؛ با S3/R2: ۱۰MB
-export const MAX_CATALOG_BYTES = (S3_CONFIGURED ? 10 : 1) * 1024 * 1024;
+// بدون S3: ۳MB با نوشتن هم‌زمان روی دیتابیس (آزمون ۳۸ تک‌اتصالی ۰٫۱MB/s بود)؛ با S3/R2: ۱۰MB
+export const MAX_CATALOG_BYTES = (S3_CONFIGURED ? 10 : 3) * 1024 * 1024;
 export const MAX_CATALOG_MB = MAX_CATALOG_BYTES / (1024 * 1024);
 let writeStep = 0;
 let readStep = 0;
@@ -100,10 +101,15 @@ export const storage: StorageAdapter = {
       return;
     }
     const total = Math.max(1, Math.ceil(body.length / CHUNK));
-    try {
-      for (let start = 0; start < total; ) {
-        const rpi = WRITE_LADDER[writeStep];
-        const end = Math.min(start + rpi * STATEMENTS_PER_TX, total);
+    const GROUP = WRITE_LADDER[0] * STATEMENTS_PER_TX; // قطعه در هر تراکنش
+    const groups = Math.ceil(total / GROUP);
+    let failed = false;
+    const writeGroup = async (g: number) => {
+      const start = g * GROUP;
+      const end = Math.min(start + GROUP, total);
+      for (;;) {
+        const step = writeStep;
+        const rpi = WRITE_LADDER[step];
         try {
           await withSystemRole(async (tx) => {
             for (let i = start; i < end; i += rpi) {
@@ -114,17 +120,35 @@ export const storage: StorageAdapter = {
               await tx.insert(catalogFileChunks).values(rows);
             }
           });
-          start = end; // این گروه کامل ثبت شد
+          return; // این گروه کامل ثبت شد
         } catch (e) {
           // گروه با rollback کامل برگشته؛ با دستورهای کوچک‌تر دوباره (بی‌خطر است)
-          if (writeStep < WRITE_LADDER.length - 1) writeStep++;
-          else throw e;
+          if (step >= WRITE_LADDER.length - 1) throw e;
+          if (writeStep === step) writeStep = step + 1;
         }
       }
-    } catch (e) {
+    };
+    let next = 0;
+    const worker = async () => {
+      while (!failed) {
+        const g = next++;
+        if (g >= groups) return;
+        try {
+          await writeGroup(g);
+        } catch (e) {
+          failed = true;
+          throw e;
+        }
+      }
+    };
+    const results = await Promise.allSettled(
+      Array.from({ length: Math.min(WRITE_CONCURRENCY, groups) }, worker)
+    );
+    const bad = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+    if (bad) {
       // قطعه‌های نیمه‌کاره‌ی این کلید باقی نماند
       await withSystemRole((tx) => tx.delete(catalogFileChunks).where(eq(catalogFileChunks.fileKey, key))).catch(() => undefined);
-      throw e;
+      throw bad.reason;
     }
   },
   async delete(key) {
