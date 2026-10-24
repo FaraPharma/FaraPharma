@@ -4,7 +4,10 @@ import { Fragment, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { importVisitorListAction } from "@/actions/listImport";
 import { parsePdfPages, parseTable, type ParseResult, type PdfItem } from "@/lib/list-import";
-import { faNum, toman } from "@/lib/format";
+import { faNum } from "@/lib/format";
+
+// قیمت فایل‌ها بدون هیچ واحدی (ریال/تومان) نمایش داده می‌شود؛ فقط عدد با جداکننده‌ی هزارگان
+const money = (n: number) => faNum(Math.round(n).toLocaleString("en-US"));
 import type { Condition } from "@/lib/types";
 
 const ROLE_FA: Record<string, string> = {
@@ -215,7 +218,7 @@ export function ListImportDialog({
                   <span dir="auto" className="min-w-0 flex-1">{r.code ? <b className="me-1">{r.code}</b> : null}{r.name}</span>
                   <span className="shrink-0 text-end" style={{ color: "var(--ink-soft)" }}>
                     {r.qty !== undefined ? `${faNum(r.qty)} ${r.unit ?? ""}` : ""}
-                    {r.price !== undefined ? <div>{toman(r.price)}</div> : null}
+                    {r.price !== undefined ? <div>{money(r.price)}</div> : null}
                   </span>
                 </div>
               ))}
@@ -253,7 +256,7 @@ export function ConditionDetails({ c }: { c: Condition }) {
       {open && (
         <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-xl p-2 text-[11px]" style={{ background: "var(--line)" }}>
           {c.rawName && (<><dt style={{ color: "var(--ink-soft)" }}>نام در فایل</dt><dd dir="auto">{c.rawName}</dd></>)}
-          {c.amount != null && (<><dt style={{ color: "var(--ink-soft)" }}>مبلغ</dt><dd>{toman(c.amount)}</dd></>)}
+          {c.amount != null && (<><dt style={{ color: "var(--ink-soft)" }}>مبلغ</dt><dd>{money(c.amount)}</dd></>)}
           {extraEntries.map(([k, v]) => (<Fragment key={k}><dt style={{ color: "var(--ink-soft)" }}>{k}</dt><dd dir="auto">{v}</dd></Fragment>))}
         </dl>
       )}
