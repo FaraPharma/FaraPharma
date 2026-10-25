@@ -567,3 +567,27 @@ export const catalogFileChunks = pgTable(
   },
   (t) => [uniqueIndex("catalog_file_chunks_pk").on(t.fileKey, t.part)]
 );
+
+/** لیست خرید (سبد) هر داروخانه: یک ردیف برای هر کالا؛ ویزیتور خالی = ناموجود نزد همه / هنوز انتخاب نشده */
+export const basketItems = pgTable(
+  "basket_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => profiles.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    productName: text("product_name").notNull(),
+    visitorId: uuid("visitor_id").references(() => visitors.id, { onDelete: "set null" }),
+    qty: integer("qty").notNull().default(1),
+    // قیمت لحظه‌ی افزودن (تومان)
+    price: integer("price"),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("basket_items_tenant_product_uq").on(t.tenantId, t.productId),
+    index("basket_items_tenant_idx").on(t.tenantId, t.addedAt),
+  ]
+);

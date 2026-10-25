@@ -1196,6 +1196,37 @@ async function visitorProductsListColumns(c: Queryable): Promise<MigrationResult
   return { columns: "visitor_products: code, warehouse, unit, qty, amount, raw_name, extra, source_file_id, last_import_id" };
 }
 
+/**
+ * مهاجرت ۰۲۱ (افزودنی): لیست خرید (سبد) هر داروخانه — کالا، ویزیتور انتخابی، تعداد و قیمتِ لحظه‌ی افزودن.
+ * RLS فعال + FORCE با سیاست tenant و مدیر، مثل بقیه‌ی جدول‌های tenant؛ بدون حذف نرم.
+ */
+async function basketItemsTable(c: Queryable): Promise<MigrationResult> {
+  const adm = `current_setting('app.role', true) = 'admin'`;
+  await c.query(`
+    CREATE TABLE IF NOT EXISTS basket_items (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      product_id uuid NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      product_name text NOT NULL,
+      visitor_id uuid REFERENCES visitors(id) ON DELETE SET NULL,
+      qty integer NOT NULL DEFAULT 1 CHECK (qty >= 1 AND qty <= 99999),
+      price integer,
+      added_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS basket_items_tenant_product_uq ON basket_items (tenant_id, product_id);
+    CREATE INDEX IF NOT EXISTS basket_items_tenant_idx ON basket_items (tenant_id, added_at);
+    ALTER TABLE basket_items ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE basket_items FORCE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS basket_items_tenant_policy ON basket_items;
+    CREATE POLICY basket_items_tenant_policy ON basket_items FOR ALL USING (tenant_id = ${GUC_TENANT}) WITH CHECK (tenant_id = ${GUC_TENANT});
+    DROP POLICY IF EXISTS basket_items_admin_policy ON basket_items;
+    CREATE POLICY basket_items_admin_policy ON basket_items FOR ALL USING (${adm}) WITH CHECK (${adm});
+    REVOKE ALL ON basket_items FROM ${APP_ROLE};
+    GRANT SELECT, INSERT, UPDATE, DELETE ON basket_items TO ${APP_ROLE};
+  `);
+  return { tables: "basket_items" };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -1220,6 +1251,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "018_catalog_blob_parts", up: catalogBlobPartsTable },
   { name: "019_catalog_file_chunks", up: catalogFileChunksTable },
   { name: "020_visitor_products_list_columns", up: visitorProductsListColumns },
+  { name: "021_basket_items", up: basketItemsTable },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);
