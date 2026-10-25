@@ -3,7 +3,7 @@
 import { IconClose } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { toman } from "@/lib/format";
+import { toman, faNum } from "@/lib/format";
 
 interface SearchResults {
   visitors: Array<{ id: string; name: string; company: string | null }>;
@@ -13,8 +13,26 @@ interface SearchResults {
     visitorId: string;
     visitorName: string;
     price: number | null;
+    qty: number | null;
+    unit: string | null;
+    stock: string;
+    ageDays: number | null;
+    stale: boolean;
+    cheapest: boolean;
   }>;
   notes: Array<{ id: string; body: string }>;
+}
+
+function ageLabel(days: number | null): string {
+  if (days === null) return "بدون تاریخ";
+  if (days <= 0) return "امروز";
+  if (days === 1) return "دیروز";
+  return `${faNum(days)} روز پیش`;
+}
+
+function stockLabel(p: { qty: number | null; unit: string | null; stock: string }): string {
+  if (p.qty !== null && p.qty > 0) return `موجودی ${faNum(p.qty)}${p.unit ? ` ${p.unit}` : ""}`;
+  return p.stock === "low" ? "موجودی کم" : "موجود";
 }
 
 /**
@@ -39,15 +57,21 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
       return;
     }
     setLoading(true);
+    const ctl = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q.trim())}`);
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q.trim())}`, { signal: ctl.signal });
         if (res.ok) setResults(await res.json());
-      } finally {
         setLoading(false);
+      } catch {
+        // لغو شده (پرسش تازه‌تر) یا خطای شبکه: وضعیت را پرسش بعدی تعیین می‌کند
+        if (!ctl.signal.aborted) setLoading(false);
       }
     }, 300);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      ctl.abort();
+    };
   }, [q, open]);
 
   function go(path: string) {
@@ -124,7 +148,7 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                 <p className="py-6 text-center text-xs" style={{ color: "var(--ink-soft)" }}>در حال جستجو…</p>
               ) : !hasResults ? (
                 <p className="py-6 text-center text-xs" style={{ color: "var(--ink-soft)" }}>
-                  نتیجه‌ای پیدا نشد
+                  نتیجه‌ای پیدا نشد؛ نام کالا را کوتاه‌تر یا ساده‌تر بنویس
                 </p>
               ) : (
                 <div className="space-y-4">
@@ -153,16 +177,38 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                         <button
                           key={p.conditionId}
                           onClick={() => go("/products")}
-                          className="flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-right transition hover:bg-[color:var(--line)]"
+                          className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-right transition hover:bg-[color:var(--line)]"
                         >
-                          <span className="min-w-0 flex-1 truncate text-xs font-medium" style={{ color: "var(--ink)" }}>
-                            {p.productName} <span style={{ color: "var(--ink-soft)" }}>— {p.visitorName}</span>
-                          </span>
-                          {p.price != null && (
-                            <span className="tnum shrink-0 text-[11px] font-bold" style={{ color: "var(--primary-dark)" }}>
-                              {toman(p.price)}
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-medium" style={{ color: "var(--ink)" }}>
+                              {p.productName}
                             </span>
-                          )}
+                            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px]" style={{ color: "var(--ink-soft)" }}>
+                              <span>{p.visitorName}</span>
+                              <span>{stockLabel(p)}</span>
+                              <span
+                                className={p.stale ? "rounded-md px-1.5 font-bold" : undefined}
+                                style={p.stale ? { background: "var(--warning-soft)", color: "var(--warning-ink)" } : undefined}
+                              >
+                                لیست: {ageLabel(p.ageDays)}
+                              </span>
+                            </span>
+                          </span>
+                          <span className="flex shrink-0 flex-col items-end gap-1">
+                            {p.price != null && (
+                              <span className="tnum text-[11px] font-bold" style={{ color: "var(--primary-dark)" }}>
+                                {toman(p.price)}
+                              </span>
+                            )}
+                            {p.cheapest && (
+                              <span
+                                className="rounded-full px-2 text-[10px] font-bold"
+                                style={{ background: "var(--success-soft)", color: "var(--success-ink)" }}
+                              >
+                                ارزان‌ترین
+                              </span>
+                            )}
+                          </span>
                         </button>
                       ))}
                     </div>
