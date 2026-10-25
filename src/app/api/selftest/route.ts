@@ -36,6 +36,8 @@ import { parseTable, visualToLogical } from "@/lib/list-import";
 import { POOL_REV } from "@/db/pool";
 import { catalogFileChunks } from "@/db/schema";
 import { POST as notesSyncPOST } from "@/app/api/quick-notes/sync/route";
+import { GET as searchGET } from "@/app/api/search/route";
+import { normalizeText, clearSearchCache } from "@/lib/product-search";
 
 /**
  * مسیر آزمایشیِ موقت برای آزمون‌های مرحله‌ی سفارش — فقط مدیر، فقط با ?confirm=yes.
@@ -120,9 +122,9 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ ?stage=search آزمون جستجوی قیمت کالا (۴۱ تا ۵۰)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
-  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" ? stageParam : "all";
+  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" || stageParam === "search" ? stageParam : "all";
   const t0All = Date.now();
 
   const pool = new Pool({
@@ -1578,6 +1580,208 @@ export async function GET(request: NextRequest) {
           return { pass, detail: pass ? "هر دو جدول RLS و FORCE دارند" : `ناموفق: پیدا شد=${r.rows.length} ناقص=[${bad.join("،")}] — ابتدا مهاجرت را اجرا کنید` };
         });
       }
+
+      // ================= آزمون جستجوی قیمت کالا (stage=search) =================
+      // داده‌ی ساختگی فقط در داروخانه‌ی آزمایشی B (و یک کالای طعمه با نام یکتا در A برای آزمون جداسازی)؛ همه در finally پاک می‌شود.
+      if (stage === "search") {
+        const tenantB = S.userB as string;
+        const adminTok = request.cookies.get(AUTH_COOKIE)?.value;
+        const adminTid = request.cookies.get("pharma_tid")?.value;
+        const store = await cookies();
+        const opts = { sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30 };
+        const AR_YEH = "\u064A";
+        const AR_KAF = "\u0643";
+        const VN12 = `SELFTEST-B-S12-${stamp}`;
+        const VN45 = `SELFTEST-B-S45-${stamp}`;
+        const VN0 = `SELFTEST-B-S00-${stamp}`;
+        const N1 = "شامپو پنتن ۴۰۰";
+        const N2 = "پنتن شامپو ۴۰۰ml";
+        const N3 = `شامپو پانت${AR_YEH}ن ۴۰۰`; // «ي» عربی
+        const N4 = `${AR_KAF}رم مرطوب ${AR_KAF}ننده ن${AR_YEH}وا ٢٠٠`; // «ك» و «ي» و ارقام عربی
+        const N5 = "شامپو پنتن ۲۰۰"; // ناموجود
+        const decoyName = `شامپو پنتن ۴۰۰ SELFTEST-${stamp}`;
+        let seedErr: string | null = null;
+        let decoyProductId: string | null = null;
+        let decoyLinkId: string | null = null;
+        try {
+          const mkVisitor = async (tenant: string, name: string) =>
+            String((await pool.query("INSERT INTO visitors (tenant_id, name) VALUES ($1, $2) RETURNING id", [tenant, name])).rows[0].id);
+          const mkProduct = async (tenant: string, name: string) =>
+            String((await pool.query("INSERT INTO products (tenant_id, name) VALUES ($1, $2) RETURNING id", [tenant, name])).rows[0].id);
+          const link = async (tenant: string, vid: string, pid: string, price: number, stockVal: string, ageDays: number) =>
+            String(
+              (
+                await pool.query(
+                  "INSERT INTO visitor_products (tenant_id, visitor_id, product_id, stock, price, qty, unit, last_import_id, updated_at) VALUES ($1, $2, $3, $4, $5, 10, 'عدد', $6, now() - make_interval(hours => $7::int)) RETURNING id",
+                  [tenant, vid, pid, stockVal, price, crypto.randomUUID(), ageDays === 0 ? 0 : ageDays * 24 + 1]
+                )
+              ).rows[0].id
+            );
+          const v12 = await mkVisitor(tenantB, VN12);
+          const v45 = await mkVisitor(tenantB, VN45);
+          const v0 = await mkVisitor(tenantB, VN0);
+          const p1 = await mkProduct(tenantB, N1);
+          const p2 = await mkProduct(tenantB, N2);
+          const p3 = await mkProduct(tenantB, N3);
+          const p4 = await mkProduct(tenantB, N4);
+          const p5 = await mkProduct(tenantB, N5);
+          await link(tenantB, v12, p1, 120000, "in", 12);
+          await link(tenantB, v45, p1, 95000, "in", 45);
+          await link(tenantB, v0, p1, 110000, "in", 0);
+          await link(tenantB, v0, p2, 80000, "in", 0);
+          await link(tenantB, v12, p3, 130000, "in", 12);
+          await link(tenantB, v12, p4, 60000, "in", 12);
+          await link(tenantB, v12, p5, 50000, "out", 12);
+          await pool.query("INSERT INTO products (tenant_id, name) SELECT $1, 'کالای انبوه ' || g FROM generate_series(1, 45) g", [tenantB]);
+          await pool.query(
+            "INSERT INTO visitor_products (tenant_id, visitor_id, product_id, stock, price, last_import_id) SELECT $1, $2, id, 'in', 1000 + length(name), $3 FROM products WHERE tenant_id = $1 AND name LIKE 'کالای انبوه %'",
+            [tenantB, v0, crypto.randomUUID()]
+          );
+          decoyProductId = await mkProduct(A, decoyName);
+          decoyLinkId = await link(A, S.vA as string, decoyProductId, 1, "in", 1);
+        } catch (e) {
+          seedErr = errMsg(e);
+        }
+        clearSearchCache(); // داده‌ی تازه‌ی بالا مستقیم در دیتابیس نوشته شد؛ کش قبلی نباید دیده شود
+        const needSeed = () => {
+          if (seedErr) throw new Error(`آماده‌سازی داده‌ی آزمایشی ناموفق: ${seedErr}`);
+        };
+        const searchAs = async (who: "B" | "A", q: string): Promise<Json[]> => {
+          try {
+            if (who === "B") {
+              const tokB = await signSession({ sub: tenantB, tid: tenantB, role: "owner", email: S.emailB as string });
+              store.set(AUTH_COOKIE, tokB, { ...opts, httpOnly: true });
+              store.set("pharma_tid", tenantB, { ...opts, httpOnly: false });
+            }
+            const res = await searchGET(new NextRequest(`${origin}/api/search?q=${encodeURIComponent(q)}`));
+            const j = await getJson(res);
+            if (res.status !== 200) throw new Error(`/api/search کد ${res.status}: ${String(j.error ?? "")}`);
+            return (j.products ?? []) as Json[];
+          } finally {
+            if (adminTok) store.set(AUTH_COOKIE, adminTok, { ...opts, httpOnly: true });
+            if (adminTid) store.set("pharma_tid", adminTid, { ...opts, httpOnly: false });
+          }
+        };
+        const namesOf = (rows: Json[]) => rows.map((r) => String(r.productName));
+        const hasName = (rows: Json[], n: string) => rows.some((r) => r.productName === n);
+        try {
+          // ---------- ۴۱) نرمال‌سازی ----------
+          await test("۴۱) نرمال‌سازی: ی/ي، ک/ك، ارقام فارسی/عربی/لاتین، نیم‌فاصله، اعراب، حروف کوچک، فاصله‌ی اضافه", async () => {
+            const cases: Array<[string, string]> = [
+              [`${AR_KAF}${AR_YEH}${AR_KAF} \u0622\u0628`, "کیک اب"],
+              ["١٢٣ ۱۲۳ 123", "123 123 123"],
+              ["\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645", "میخواهم"],
+              ["\u0634\u064E\u0627\u0645\u067E\u064F\u0648", "شامپو"],
+              ["  SHAMPOO   Pantene ", "shampoo pantene"],
+              ["۴۰۰ml", "400 ml"],
+              ["400 ML", "400 ml"],
+            ];
+            const bad = cases.filter(([i, o]) => normalizeText(i) !== o).map(([i, o]) => `«${i}» → «${normalizeText(i)}» (انتظار «${o}»)`);
+            return { pass: bad.length === 0, detail: bad.length === 0 ? `${cases.length} نمونه درست نرمال شد` : bad.join(" | ") };
+          });
+
+          // ---------- ۴۲) ترتیب کلمه‌ها ----------
+          await test("۴۲) جستجو بی‌توجه به ترتیب کلمه‌ها (و املای متفاوت ml/۴۰۰)", async () => {
+            needSeed();
+            const fwd = await searchAs("B", "شامپو پنتن ۴۰۰");
+            const rev = await searchAs("B", "پنتن شامپو ۴۰۰");
+            const ids = (r: Json[]) => r.map((x) => String(x.conditionId)).sort().join(",");
+            const pass = hasName(fwd, N1) && hasName(fwd, N2) && hasName(rev, N1) && hasName(rev, N2) && ids(fwd) === ids(rev);
+            return { pass, detail: pass ? `هر دو ترتیب ${fwd.length} نتیجه‌ی یکسان دادند (شامل «${N1}» و «${N2}»)` : `ترتیب عادی: [${namesOf(fwd).join("، ")}] | معکوس: [${namesOf(rev).join("، ")}]` };
+          });
+
+          // ---------- ۴۳) غلط املایی ----------
+          await test("۴۳) تحمل غلط املایی ساده (یک حرف اشتباه یا جابه‌جایی)؛ عدد اشتباه رد می‌شود", async () => {
+            needSeed();
+            const wrong = await searchAs("B", "شامپو پنتم ۴۰۰");
+            const swap = await searchAs("B", "شاپمو پنتن ۴۰۰");
+            const num = await searchAs("B", "شامپو پنتن ۳۰۰");
+            const pass = hasName(wrong, N1) && hasName(swap, N1) && num.length === 0;
+            return { pass, detail: pass ? "«پنتم» و «شاپمو» هم کالا را پیدا کردند؛ «۳۰۰» هیچ نتیجه‌ای نداد" : `یک حرف اشتباه: ${wrong.length} نتیجه | جابه‌جایی: ${swap.length} | عدد اشتباه: ${num.length} (باید ۰)` };
+          });
+
+          // ---------- ۴۴) پیشوندی ----------
+          await test("۴۴) جستجوی پیشوندی (وسط تایپ هم نتیجه می‌آید)", async () => {
+            needSeed();
+            const a = await searchAs("B", "شام پن");
+            const b = await searchAs("B", "پنت شامپو ۴");
+            const pass = hasName(a, N1) && hasName(a, N2) && hasName(b, N1) && hasName(b, N2);
+            return { pass, detail: pass ? "«شام پن» و «پنت شامپو ۴» هر دو کالاها را پیدا کردند" : `«شام پن»: ${a.length} نتیجه | «پنت شامپو ۴»: ${b.length}` };
+          });
+
+          // ---------- ۴۵) ی/ک و ارقام ----------
+          await test("۴۵) «ي/ك» و ارقام عربی در نام ذخیره‌شده با پرسش فارسی/لاتین یکی حساب می‌شود", async () => {
+            needSeed();
+            const a = await searchAs("B", "شامپو پانتین ۴۰۰");
+            const b = await searchAs("B", "کرم مرطوب کننده نیوا 200");
+            const c = await searchAs("B", "شامپو پنتن ٤٠٠");
+            const pass = hasName(a, N3) && hasName(b, N4) && hasName(c, N1);
+            return { pass, detail: pass ? "ی عربی، ک عربی، ارقام عربی/فارسی/لاتین همه تطبیق شدند" : `پانتین: ${hasName(a, N3)} | کرم نیوا: ${hasName(b, N4)} | ارقام عربی: ${hasName(c, N1)}` };
+          });
+
+          // ---------- ۴۶) ناموجود ----------
+          await test("۴۶) کالای ناموجود (stock = out) در نتیجه نمی‌آید", async () => {
+            needSeed();
+            const a = await searchAs("B", "شامپو پنتن ۲۰۰");
+            const b = await searchAs("B", "شامپو پنتن");
+            const pass = a.length === 0 && !hasName(b, N5) && b.every((r) => r.stock !== "out" && Number(r.price) !== 50000);
+            return { pass, detail: pass ? "کالای ناموجود نه با نام کامل و نه در جستجوی عمومی برگشت" : `جستجوی دقیق ناموجود: ${a.length} نتیجه | در جستجوی عمومی: ${hasName(b, N5)}` };
+          });
+
+          // ---------- ۴۷) ترتیب و ارزان‌ترین ----------
+          await test("۴۷) ترتیب: مرتبط‌ترین اول، بین هم‌سطح‌ها ارزان‌ترین؛ برچسب «ارزان‌ترین»", async () => {
+            needSeed();
+            const rows = await searchAs("B", N1);
+            const first3 = rows.slice(0, 3).map((r) => Number(r.price));
+            const fourth = rows[3];
+            const flagged = rows.filter((r) => r.cheapest === true);
+            const pass =
+              rows.length === 4 &&
+              first3.join(",") === "95000,110000,120000" &&
+              fourth?.productName === N2 &&
+              Number(fourth?.price) === 80000 &&
+              flagged.length === 1 &&
+              flagged[0] === fourth;
+            return { pass, detail: pass ? "سه ردیفِ دقیقاً هم‌نام به‌ترتیب ۹۵٬۰۰۰ < ۱۱۰٬۰۰۰ < ۱۲۰٬۰۰۰، بعد نام کم‌شباهت‌تر (۸۰٬۰۰۰)؛ فقط ارزان‌ترین برچسب خورد" : `قیمت‌ها: [${rows.map((r) => `${r.productName}=${r.price}`).join("، ")}] | تعداد برچسب: ${flagged.length}` };
+          });
+
+          // ---------- ۴۸) سن لیست ----------
+          await test("۴۸) سن لیست درست محاسبه می‌شود و بیش از ۳۰ روز هشدار می‌گیرد", async () => {
+            needSeed();
+            const rows = await searchAs("B", N1);
+            const by = (vn: string) => rows.find((r) => r.productName === N1 && r.visitorName === vn);
+            const a = by(VN12);
+            const b = by(VN45);
+            const c = by(VN0);
+            const pass = a?.ageDays === 12 && a?.stale === false && b?.ageDays === 45 && b?.stale === true && c?.ageDays === 0 && c?.stale === false;
+            return { pass, detail: pass ? "۱۲ روز: عادی، ۴۵ روز: هشدار، امروز: ۰" : `۱۲روزه=${a?.ageDays}/${a?.stale} | ۴۵روزه=${b?.ageDays}/${b?.stale} | امروز=${c?.ageDays}/${c?.stale}` };
+          });
+
+          // ---------- ۴۹) سقف نتیجه ----------
+          await test("۴۹) حداکثر ۴۰ نتیجه برمی‌گردد", async () => {
+            needSeed();
+            const rows = await searchAs("B", "انبوه");
+            const pass = rows.length === 40;
+            return { pass, detail: pass ? "از ۴۵ کالای مطابق، دقیقاً ۴۰ نتیجه برگشت" : `تعداد نتیجه: ${rows.length} (باید ۴۰)` };
+          });
+
+          // ---------- ۵۰) جداسازی tenant ----------
+          await test("۵۰) جداسازی داروخانه‌ها: نتیجه‌ی داروخانه‌ی دیگر نمی‌آید", async () => {
+            needSeed();
+            const asA = await searchAs("A", "شامپو پنتن ۴۰۰ SELFTEST");
+            const foundByA = asA.some((r) => r.conditionId === decoyLinkId);
+            const asB = await searchAs("B", "شامپو پنتن");
+            const leaked = asB.some((r) => r.conditionId === decoyLinkId || r.visitorId === S.vA || Number(r.price) === 1);
+            const pass = foundByA && !leaked;
+            return { pass, detail: pass ? "کالای طعمه فقط برای صاحب خودش دیده شد و برای داروخانه‌ی B برنگشت" : `طعمه برای صاحبش پیدا شد: ${foundByA} | به B نشت کرد: ${leaked}` };
+          });
+        } finally {
+          if (decoyProductId) await pool.query("DELETE FROM products WHERE id = $1 AND tenant_id = $2", [decoyProductId, A]).catch(() => undefined);
+          await pool.query("DELETE FROM visitors WHERE tenant_id = $1 AND name LIKE 'SELFTEST-B-S%'", [tenantB]).catch(() => undefined);
+          await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]).catch(() => undefined);
+          clearSearchCache();
+        }
+      }
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -1635,7 +1839,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
