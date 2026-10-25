@@ -8,6 +8,7 @@ import { OfflineBadge } from "@/components/offline-badge";
 import { PageHeader, Button, Badge, Spinner, EmptyState, RefreshButton } from "@/components/ui";
 import { setShortageAction } from "@/actions/shortages";
 import { createRequestAction } from "@/actions/priceRequests";
+import { addAllShortagesAction } from "@/actions/basket";
 import { faDateTime, faNum } from "@/lib/format";
 import { CATEGORIES, type CategoryKey } from "@/lib/config";
 import type { Product } from "@/lib/types";
@@ -67,6 +68,28 @@ export default function ShortagesPage() {
     } else toast.error(res.error ?? "خطا");
   }
 
+  /** همه‌ی کسری‌ها به لیست خرید: برای هر کالا ارزان‌ترین ویزیتور موجود */
+  async function addAllToBasket() {
+    setBusy(true);
+    const res = await addAllShortagesAction();
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error ?? "خطا");
+      return;
+    }
+    const added = res.added ?? 0;
+    const noVisitor = res.noVisitor ?? 0;
+    const already = res.alreadyIn ?? 0;
+    if (added === 0 && already === 0) toast.error("کسری‌ای برای افزودن نیست");
+    else
+      toast.success(
+        `${faNum(added)} کالا به لیست خرید رفت` +
+          (noVisitor ? ` (${faNum(noVisitor)} کالا ناموجود نزد همه)` : "") +
+          (already ? ` — ${faNum(already)} کالا از قبل در لیست بود` : "")
+      );
+    router.push("/basket");
+  }
+
   if (loading && !data) return <Spinner />;
 
   return (
@@ -77,6 +100,14 @@ export default function ShortagesPage() {
         action={
           <div className="flex gap-2">
             <RefreshButton onClick={() => load()} />
+            <Button
+              variant="secondary"
+              onClick={addAllToBasket}
+              disabled={busy || products.length === 0}
+              className="px-4 text-sm"
+            >
+              افزودن همه‌ی کسری‌ها به لیست خرید
+            </Button>
             <Button
               onClick={makeRequest}
               disabled={busy || products.length === 0}
