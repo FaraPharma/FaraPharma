@@ -38,6 +38,17 @@ import { catalogFileChunks } from "@/db/schema";
 import { POST as notesSyncPOST } from "@/app/api/quick-notes/sync/route";
 import { GET as searchGET } from "@/app/api/search/route";
 import { normalizeText, clearSearchCache } from "@/lib/product-search";
+import { GET as basketGET } from "@/app/api/basket/route";
+import {
+  addToBasketAction,
+  addAllShortagesAction,
+  setBasketQtyAction,
+  setBasketVisitorAction,
+  removeBasketItemAction,
+  clearBasketAction,
+  placeBasketOrderAction,
+} from "@/actions/basket";
+import { groupBasket, basketGroupText, basketGroupOrder, parseQty, type BasketItem } from "@/lib/basket";
 
 /**
  * مسیر آزمایشیِ موقت برای آزمون‌های مرحله‌ی سفارش — فقط مدیر، فقط با ?confirm=yes.
@@ -122,9 +133,9 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ ?stage=search آزمون جستجوی قیمت کالا (۴۱ تا ۵۰)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ ?stage=search آزمون جستجوی قیمت کالا (۴۱ تا ۵۰)؛ ?stage=basket آزمون لیست خرید (۵۱ تا ۵۹)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
-  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" || stageParam === "search" ? stageParam : "all";
+  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" || stageParam === "search" || stageParam === "basket" ? stageParam : "all";
   const t0All = Date.now();
 
   const pool = new Pool({
@@ -1782,6 +1793,270 @@ export async function GET(request: NextRequest) {
           clearSearchCache();
         }
       }
+
+      // ================= آزمون لیست خرید (stage=basket) =================
+      // داده‌ی ساختگی فقط در داروخانه‌ی آزمایشی B (و یک ردیف طعمه با کالای یکتا در A برای آزمون جداسازی)؛ همه در finally پاک می‌شود.
+      if (stage === "basket") {
+        const tenantB = S.userB as string;
+        const adminTok = request.cookies.get(AUTH_COOKIE)?.value;
+        const adminTid = request.cookies.get("pharma_tid")?.value;
+        const store = await cookies();
+        const opts = { sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30 };
+        const VN_A = `SELFTEST-B-K1-${stamp}`;
+        const VN_B = `SELFTEST-B-K2-${stamp}`;
+        const VN_C = `SELFTEST-B-K3-${stamp}`;
+        const X1 = "شامپو بیوتی ۴۰۰";
+        const X2 = "کرم دست رز";
+        const X3 = "ناموجود نمونه";
+        const X4 = "سرم سلول";
+        const X5 = "قطره چشم";
+        const decoyName = `کالای طعمه سبد SELFTEST-${stamp}`;
+        const ids: { vA?: string; vB?: string; vC?: string; x1c?: string; x1outC?: string; decoyProduct?: string; decoyRow?: string } = {};
+        let seedErr: string | null = null;
+        try {
+          const mkVisitor = async (name: string) =>
+            String((await pool.query("INSERT INTO visitors (tenant_id, name) VALUES ($1, $2) RETURNING id", [tenantB, name])).rows[0].id);
+          const mkProduct = async (tenant: string, name: string, short: boolean) =>
+            String(
+              (
+                await pool.query("INSERT INTO products (tenant_id, name, is_short, short_at) VALUES ($1, $2, $3, CASE WHEN $3 THEN now() ELSE NULL END) RETURNING id", [tenant, name, short])
+              ).rows[0].id
+            );
+          const link = async (vid: string, pid: string, price: number, stockVal: string, ageDays: number) =>
+            String(
+              (
+                await pool.query(
+                  "INSERT INTO visitor_products (tenant_id, visitor_id, product_id, stock, price, qty, unit, last_import_id, updated_at) VALUES ($1, $2, $3, $4, $5, 10, 'عدد', $6, now() - make_interval(hours => $7::int)) RETURNING id",
+                  [tenantB, vid, pid, stockVal, price, crypto.randomUUID(), ageDays === 0 ? 0 : ageDays * 24 + 1]
+                )
+              ).rows[0].id
+            );
+          ids.vA = await mkVisitor(VN_A);
+          ids.vB = await mkVisitor(VN_B);
+          ids.vC = await mkVisitor(VN_C);
+          const p1 = await mkProduct(tenantB, X1, true);
+          const p2 = await mkProduct(tenantB, X2, false);
+          const p3 = await mkProduct(tenantB, X3, true);
+          const p4 = await mkProduct(tenantB, X4, true);
+          const p5 = await mkProduct(tenantB, X5, true);
+          await link(ids.vA, p1, 100000, "in", 10);
+          await link(ids.vB, p1, 90000, "in", 45);
+          ids.x1outC = await link(ids.vC, p1, 50000, "out", 0);
+          await link(ids.vA, p2, 70000, "in", 10);
+          await link(ids.vA, p3, 40000, "out", 10);
+          await link(ids.vA, p4, 40000, "in", 10);
+          await link(ids.vC, p4, 40000, "in", 0);
+          await link(ids.vB, p5, 30000, "in", 45);
+          ids.decoyProduct = await mkProduct(A, decoyName, false);
+          ids.decoyRow = String(
+            (await pool.query("INSERT INTO basket_items (tenant_id, product_id, product_name, qty) VALUES ($1, $2, $3, 7) RETURNING id", [A, ids.decoyProduct, decoyName])).rows[0].id
+          );
+        } catch (e) {
+          seedErr = `${errMsg(e)} — اگر «basket_items» نیست، مهاجرت ۰۲۱ را اجرا کنید`;
+        }
+        clearSearchCache();
+        const needSeed = () => {
+          if (seedErr) throw new Error(`آماده‌سازی داده‌ی آزمایشی ناموفق: ${seedErr}`);
+        };
+        const asB = async <T>(fn: () => Promise<T>): Promise<T> => {
+          try {
+            const tokB = await signSession({ sub: tenantB, tid: tenantB, role: "owner", email: S.emailB as string });
+            store.set(AUTH_COOKIE, tokB, { ...opts, httpOnly: true });
+            store.set("pharma_tid", tenantB, { ...opts, httpOnly: false });
+            return await fn();
+          } finally {
+            if (adminTok) store.set(AUTH_COOKIE, adminTok, { ...opts, httpOnly: true });
+            if (adminTid) store.set("pharma_tid", adminTid, { ...opts, httpOnly: false });
+          }
+        };
+        const basketOf = async (who: "B" | "A"): Promise<BasketItem[]> => {
+          const read = async () => {
+            const res = await basketGET();
+            const j = await getJson(res);
+            if (res.status !== 200) throw new Error(`/api/basket کد ${res.status}: ${String(j.error ?? "")}`);
+            return (j.items ?? []) as BasketItem[];
+          };
+          return who === "B" ? asB(read) : read();
+        };
+        const byName = (items: BasketItem[], n: string) => items.find((x) => x.productName === n);
+        let gA: BasketItem | undefined;
+        let orderNo1 = 0;
+        try {
+          // ---------- ۵۱) افزودن از جستجو ----------
+          await test("۵۱) افزودن از نتایج جستجو: ردیف همان ویزیتور، تعداد ۱، قیمت لحظه‌ی افزودن؛ ناموجود رد می‌شود", async () => {
+            needSeed();
+            const hits = await asB(async () => {
+              const res = await searchGET(new NextRequest(`${origin}/api/search?q=${encodeURIComponent(X2)}`));
+              return ((await getJson(res)).products ?? []) as Json[];
+            });
+            const hit = hits.find((h) => h.productName === X2 && h.visitorName === VN_A);
+            if (!hit) throw new Error("نتیجه‌ی جستجو برای کالای آزمایشی پیدا نشد");
+            const r1 = await asB(() => addToBasketAction({ conditionId: String(hit.conditionId) }));
+            const r2 = await asB(() => addToBasketAction({ conditionId: String(hit.conditionId) }));
+            const rOut = await asB(() => addToBasketAction({ conditionId: ids.x1outC as string }));
+            const rBadQty = await asB(() => addToBasketAction({ conditionId: String(hit.conditionId), qty: 0 }));
+            const items = await basketOf("B");
+            const it = byName(items, X2);
+            const pass =
+              r1.ok === true && r1.updated === false && r2.ok === true && r2.updated === true && rOut.ok === false && rBadQty.ok === false &&
+              items.length === 1 && it?.visitorName === VN_A && it?.qty === 1 && it?.price === 70000;
+            return { pass, detail: pass ? "افزودن از جستجو درست شد؛ افزودن دوباره ردیف تکراری نساخت؛ کالای ناموجود و تعداد نامعتبر رد شد" : `r1=${JSON.stringify(r1)} r2=${JSON.stringify(r2)} ناموجود=${JSON.stringify(rOut)} تعداد۰=${JSON.stringify(rBadQty)} ردیف‌ها=${items.length} ${JSON.stringify(it)}` };
+          });
+
+          // ---------- ۵۲) افزودن همه‌ی کسری‌ها ----------
+          await test("۵۲) افزودن همه‌ی کسری‌ها: ارزان‌ترین ویزیتور موجود؛ هم‌قیمت = لیست تازه‌تر؛ ناموجود نزد همه بدون ویزیتور", async () => {
+            needSeed();
+            const r = await asB(() => addAllShortagesAction());
+            const r2 = await asB(() => addAllShortagesAction());
+            const items = await basketOf("B");
+            const i1 = byName(items, X1);
+            const i3 = byName(items, X3);
+            const i4 = byName(items, X4);
+            const i5 = byName(items, X5);
+            const i2 = byName(items, X2);
+            const pass =
+              r.ok === true && r.added === 4 && r.noVisitor === 1 && r.alreadyIn === 0 &&
+              r2.ok === true && r2.added === 0 && r2.alreadyIn === 4 &&
+              items.length === 5 &&
+              i1?.visitorName === VN_B && i1?.price === 90000 && i1?.qty === 1 &&
+              i4?.visitorName === VN_C && i4?.price === 40000 &&
+              i5?.visitorName === VN_B &&
+              i3?.visitorId === null && i3?.unavailable === true &&
+              i2?.visitorName === VN_A && i2?.qty === 1;
+            return { pass, detail: pass ? "ارزان‌ترین (۹۰٬۰۰۰ نزد ویزیتور دوم)، هم‌قیمت با لیست تازه‌تر، ناموجود نزد همه بدون ویزیتور؛ اجرای دوباره چیزی تکراری نساخت" : `نتیجه اول=${JSON.stringify(r)} دوم=${JSON.stringify(r2)} تعداد=${items.length} X1=${i1?.visitorName}/${i1?.price} X4=${i4?.visitorName} X3=${i3?.visitorId}/${i3?.unavailable}` };
+          });
+
+          // ---------- ۵۳) تغییر تعداد و ویزیتور ----------
+          await test("۵۳) تغییر تعداد (ارقام فارسی، نامعتبر رد) و ویزیتور (فقط ویزیتورِ دارای کالا)", async () => {
+            needSeed();
+            let items = await basketOf("B");
+            const x1 = byName(items, X1);
+            if (!x1) throw new Error("ردیف کالای اول پیدا نشد");
+            const q = await asB(() => setBasketQtyAction({ id: x1.id, qty: 3 }));
+            const q0 = await asB(() => setBasketQtyAction({ id: x1.id, qty: 0 }));
+            const qBad = await asB(() => setBasketQtyAction({ id: x1.id, qty: Number("abc") }));
+            const parse = parseQty("۱۲") === 12 && parseQty("١٢٣") === 123 && parseQty("0") === null && parseQty("1.5") === null && parseQty("") === null && parseQty("100000") === null;
+            const v1 = await asB(() => setBasketVisitorAction({ id: x1.id, visitorId: ids.vA as string }));
+            const vOut = await asB(() => setBasketVisitorAction({ id: x1.id, visitorId: ids.vC as string }));
+            const vForeign = await asB(() => setBasketVisitorAction({ id: x1.id, visitorId: S.vA as string }));
+            items = await basketOf("B");
+            gA = byName(items, X1);
+            const pass =
+              q.ok === true && q0.ok === false && qBad.ok === false && parse &&
+              v1.ok === true && vOut.ok === false && vForeign.ok === false &&
+              gA?.qty === 3 && gA?.visitorName === VN_A && gA?.price === 100000;
+            return { pass, detail: pass ? "تعداد ۳ شد، ۰ و غیرعدد رد شد؛ ویزیتور به اولی رفت و قیمتش ۱۰۰٬۰۰۰ شد؛ ویزیتورِ ناموجود/بیگانه رد شد" : `qty=${JSON.stringify(q)} صفر=${JSON.stringify(q0)} غیرعدد=${JSON.stringify(qBad)} parse=${parse} ویزیتور=${JSON.stringify(v1)} ناموجود=${JSON.stringify(vOut)} بیگانه=${JSON.stringify(vForeign)} نهایی=${gA?.qty}/${gA?.visitorName}/${gA?.price}` };
+          });
+
+          // ---------- ۵۴) گروه‌بندی ----------
+          await test("۵۴) گروه‌بندی بر اساس ویزیتور، ترتیب کالاها، هشدار لیست کهنه، گروهِ ناموجود", async () => {
+            needSeed();
+            const groups = groupBasket(await basketOf("B"));
+            const names = groups.map((g) => g.visitorName);
+            const ga = groups[0];
+            const gb = groups[1];
+            const gc = groups[2];
+            const gn = groups[3];
+            const pass =
+              groups.length === 4 && names.slice(0, 3).join("|") === [VN_A, VN_B, VN_C].join("|") && gn?.visitorId === null && gn?.orderable === false &&
+              ga?.items.map((i) => i.productName).join("|") === [X1, X2].join("|") && ga?.totalQty === 4 && ga?.stale === false && ga?.ageDays === 10 &&
+              gb?.items.length === 1 && gb?.stale === true && gb?.ageDays === 45 &&
+              gc?.items[0]?.productName === X4 && gn?.items[0]?.productName === X3 && gn?.items[0]?.unavailable === true;
+            return { pass, detail: pass ? "۴ گروه: سه ویزیتور به‌ترتیب نام + «بدون ویزیتور»؛ گروه ۴۵ روزه هشدار گرفت و ۱۰ روزه نه" : `گروه‌ها: ${groups.map((g) => `${g.visitorName}[${g.items.map((i) => i.productName).join("،")}] stale=${g.stale}/${g.ageDays}`).join(" ؛ ")}` };
+          });
+
+          // ---------- ۵۵) متن خروجی ----------
+          await test("۵۵) متن خروجی فارسی: سلام، «نام — تعداد»، ترتیب، مجموع؛ بدون قیمت مگر روشن شود", async () => {
+            needSeed();
+            const g = groupBasket(await basketOf("B"))[0];
+            const plain = basketGroupText(g);
+            const priced = basketGroupText(g, { withPrice: true });
+            const lines = plain.split("\n");
+            const i1 = lines.findIndex((l) => l.includes(`${X1} — ۳`));
+            const i2 = lines.findIndex((l) => l.includes(`${X2} — ۱`));
+            const order = basketGroupOrder(g);
+            const pass =
+              lines[0] === "سلام" && i1 >= 0 && i2 > i1 && plain.includes("مجموع تعداد: ۴") && !/[0-9]/.test(plain) && !plain.includes("تومان") &&
+              priced.includes("تومان") && priced.includes("۱۰۰,۰۰۰") && order.items?.length === 2 && order.items?.[0]?.qty === 3 && order.visitorName === VN_A;
+            return { pass, detail: pass ? "متن درست، بدون ارقام لاتین و بدون قیمت؛ با گزینه‌ی قیمت، مبلغ آمد؛ ورودی اکسل/PDF هم ساخته شد" : `متن:\n${plain}\n---\nبا قیمت:\n${priced}` };
+          });
+
+          // ---------- ۵۶) ثبت به‌عنوان سفارش ----------
+          await test("۵۶) ثبت به‌عنوان سفارش: شماره‌ی یکتا، ردیف‌های گروه پاک، کسری رفع، تکرار کلید سفارش تازه نمی‌سازد", async () => {
+            needSeed();
+            const key = `basket-${crypto.randomUUID()}`;
+            const r = await asB(() => placeBasketOrderAction({ visitorId: ids.vA as string, clientKey: key }));
+            const again = await asB(() => placeBasketOrderAction({ visitorId: ids.vA as string, clientKey: key }));
+            const noVisitor = await asB(() => placeBasketOrderAction({ visitorId: "", clientKey: `basket-${crypto.randomUUID()}` }));
+            const emptyGroup = await asB(() => placeBasketOrderAction({ visitorId: ids.vA as string, clientKey: `basket-${crypto.randomUUID()}` }));
+            const cnt = await pool.query("SELECT count(*)::int AS n FROM orders WHERE tenant_id = $1 AND client_key = $2", [tenantB, key]);
+            const its = await pool.query(
+              "SELECT oi.product_name AS n, oi.qty AS q, oi.unit_price AS p FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.tenant_id = $1 AND o.client_key = $2 ORDER BY oi.product_name",
+              [tenantB, key]
+            );
+            const left = await basketOf("B");
+            const short = await pool.query("SELECT is_short FROM products WHERE tenant_id = $1 AND name = $2", [tenantB, X1]);
+            const r2 = await asB(() => placeBasketOrderAction({ visitorId: ids.vC as string, clientKey: `basket-${crypto.randomUUID()}` }));
+            orderNo1 = Number(r.orderNo ?? 0);
+            const got = its.rows.map((x) => `${x.n}:${x.q}:${x.p}`).sort().join("|");
+            const want = [`${X1}:3:100000`, `${X2}:1:70000`].sort().join("|");
+            const pass =
+              r.ok === true && orderNo1 >= 1 && again.ok === true && again.duplicate === true && again.id === r.id &&
+              cnt.rows[0].n === 1 && got === want && noVisitor.ok === false && emptyGroup.ok === false &&
+              left.length === 3 && !left.some((x) => x.productName === X1 || x.productName === X2) &&
+              short.rows[0]?.is_short === false &&
+              r2.ok === true && Number(r2.orderNo) === orderNo1 + 1;
+            return { pass, detail: pass ? `سفارش شماره ${orderNo1} با دو قلم ثبت شد؛ تکرار همان کلید سفارش تازه نساخت؛ ردیف‌های آن گروه پاک و کسری رفع شد؛ سفارش بعدی شماره ${orderNo1 + 1} گرفت` : `r=${JSON.stringify(r)} تکرار=${JSON.stringify(again)} تعداد=${cnt.rows[0].n} اقلام=${got} باقی=${left.length} کسری=${short.rows[0]?.is_short} دوم=${JSON.stringify(r2)} بدونویزیتور=${JSON.stringify(noVisitor)} گروهخالی=${JSON.stringify(emptyGroup)}` };
+          });
+
+          // ---------- ۵۷) جداسازی tenant ----------
+          await test("۵۷) جداسازی داروخانه‌ها: لیست داروخانه‌ی دیگر دیده یا تغییر داده نمی‌شود", async () => {
+            needSeed();
+            const asBItems = await basketOf("B");
+            const asAItems = await basketOf("A");
+            const seenByB = asBItems.some((x) => x.productName === decoyName);
+            const seenByA = asAItems.some((x) => x.productName === decoyName);
+            const rm = await asB(() => removeBasketItemAction(ids.decoyRow as string));
+            const q = await asB(() => setBasketQtyAction({ id: ids.decoyRow as string, qty: 9 }));
+            const row = await pool.query("SELECT qty FROM basket_items WHERE id = $1", [ids.decoyRow]);
+            const pass = !seenByB && seenByA && rm.ok === false && q.ok === false && row.rows[0]?.qty === 7;
+            return { pass, detail: pass ? "ردیف داروخانه‌ی A فقط برای خودش دیده شد؛ حذف و تغییر آن از نشست B رد شد و ردیف دست‌نخورده ماند" : `B دید=${seenByB} | A دید=${seenByA} | حذف=${JSON.stringify(rm)} | تغییر=${JSON.stringify(q)} | تعداد فعلی=${row.rows[0]?.qty}` };
+          });
+
+          // ---------- ۵۸) حذف و پاک‌کردن ----------
+          await test("۵۸) حذف یک ردیف و پاک‌کردن همه (فقط لیست خودِ داروخانه)", async () => {
+            needSeed();
+            const before = await basketOf("B");
+            const x3 = byName(before, X3);
+            if (!x3) throw new Error("ردیف ناموجود نمونه پیدا نشد");
+            const rm = await asB(() => removeBasketItemAction(x3.id));
+            const mid = await basketOf("B");
+            const clr = await asB(() => clearBasketAction());
+            const after = await basketOf("B");
+            const decoy = await pool.query("SELECT count(*)::int AS n FROM basket_items WHERE id = $1", [ids.decoyRow]);
+            const pass = rm.ok === true && before.length === 2 && mid.length === 1 && clr.ok === true && after.length === 0 && decoy.rows[0].n === 1;
+            return { pass, detail: pass ? "حذف یک ردیف (۲ ← ۱) و پاک‌کردن همه (← ۰) درست بود؛ ردیف داروخانه‌ی A دست نخورد" : `پیش=${before.length} میانه=${mid.length} پس=${after.length} ردیفA=${decoy.rows[0].n} حذف=${JSON.stringify(rm)} پاک=${JSON.stringify(clr)}` };
+          });
+
+          // ---------- ۵۹) RLS و دسترسی جدول ----------
+          await test("۵۹) جدول basket_items: RLS + FORCE، سیاست tenant و مدیر، دسترسی app_runtime فقط DML", async () => {
+            const t = await pool.query("SELECT c.relrowsecurity AS rls, c.relforcerowsecurity AS frc FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = 'basket_items'");
+            const pol = await pool.query("SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'basket_items'");
+            const priv = await pool.query(
+              `SELECT has_table_privilege('${APP_ROLE}', 'public.basket_items', 'SELECT') AS s, has_table_privilege('${APP_ROLE}', 'public.basket_items', 'INSERT') AS i, has_table_privilege('${APP_ROLE}', 'public.basket_items', 'UPDATE') AS u, has_table_privilege('${APP_ROLE}', 'public.basket_items', 'DELETE') AS d, has_table_privilege('${APP_ROLE}', 'public.basket_items', 'TRUNCATE') AS tr`
+            );
+            const names = pol.rows.map((x) => String(x.policyname));
+            const p = priv.rows[0] as Json;
+            const pass = t.rows[0]?.rls === true && t.rows[0]?.frc === true && names.includes("basket_items_tenant_policy") && names.includes("basket_items_admin_policy") && p.s && p.i && p.u && p.d && !p.tr;
+            return { pass: Boolean(pass), detail: pass ? "RLS و FORCE فعال، هر دو سیاست برقرار، app_runtime فقط SELECT/INSERT/UPDATE/DELETE دارد" : `جدول=${JSON.stringify(t.rows[0])} سیاست‌ها=[${names.join("،")}] دسترسی=${JSON.stringify(p)}` };
+          });
+        } finally {
+          if (ids.decoyProduct) await pool.query("DELETE FROM products WHERE id = $1 AND tenant_id = $2", [ids.decoyProduct, A]).catch(() => undefined);
+          await pool.query("DELETE FROM visitors WHERE tenant_id = $1 AND name LIKE 'SELFTEST-B-K%'", [tenantB]).catch(() => undefined);
+          await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]).catch(() => undefined);
+          clearSearchCache();
+        }
+      }
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -1839,7 +2114,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : stage === "basket" ? 10 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
