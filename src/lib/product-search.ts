@@ -107,6 +107,13 @@ export interface SearchHit {
   cheapest: boolean;
 }
 
+/** سن لیست یک ویزیتور از زمان آخرین ورود فایل (ISO)؛ بیش از ۳۰ روز = کهنه */
+export function listAgeInfo(iso: string | null | undefined, now = Date.now()): { ageDays: number | null; stale: boolean } {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  const ageDays = Number.isFinite(t) ? Math.max(0, Math.floor((now - t) / 86_400_000)) : null;
+  return { ageDays, stale: ageDays !== null && ageDays > STALE_DAYS };
+}
+
 export const MAX_RESULTS = 40;
 export const STALE_DAYS = 30;
 
