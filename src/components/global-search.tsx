@@ -3,6 +3,8 @@
 import { IconClose } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { addToBasketAction } from "@/actions/basket";
 import { toman, faNum } from "@/lib/format";
 
 interface SearchResults {
@@ -73,6 +75,18 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
       ctl.abort();
     };
   }, [q, open]);
+
+  const [added, setAdded] = useState<Set<string>>(new Set());
+
+  async function addToBasket(conditionId: string, name: string) {
+    const res = await addToBasketAction({ conditionId });
+    if (res.ok) {
+      setAdded((prev) => new Set(prev).add(conditionId));
+      toast.success(`«${name}» به لیست خرید افزوده شد`, {
+        action: { label: "مشاهده", onClick: () => router.push("/basket") },
+      });
+    } else toast.error(res.error ?? "افزودن ممکن نشد");
+  }
 
   function go(path: string) {
     setOpen(false);
@@ -174,10 +188,10 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                     <div>
                       <div className="mb-1.5 text-[10px] font-bold" style={{ color: "var(--ink-soft)" }}>محصولات</div>
                       {results!.products.map((p) => (
+                        <div key={p.conditionId} className="flex items-center gap-1.5">
                         <button
-                          key={p.conditionId}
                           onClick={() => go("/products")}
-                          className="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-right transition hover:bg-[color:var(--line)]"
+                          className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-right transition hover:bg-[color:var(--line)]"
                         >
                           <span className="min-w-0 flex-1">
                             <span className="block text-xs font-medium" style={{ color: "var(--ink)" }}>
@@ -210,6 +224,16 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                             )}
                           </span>
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => void addToBasket(p.conditionId, p.productName)}
+                          disabled={added.has(p.conditionId)}
+                          aria-label={`افزودن ${p.productName} به لیست خرید`}
+                          className="btn-secondary shrink-0 !px-3 text-[11px] font-bold"
+                        >
+                          {added.has(p.conditionId) ? "افزوده شد" : "افزودن"}
+                        </button>
+                        </div>
                       ))}
                     </div>
                   )}

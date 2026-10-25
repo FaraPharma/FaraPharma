@@ -38,6 +38,15 @@ export function IconBox({ className }: IconProps) {
     </svg>
   );
 }
+export function IconBasket({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} {...stroke}>
+      <path d="M3 4h2.2l2 11h10.4l1.9-8H6.2" />
+      <circle cx="9" cy="19.5" r="1.4" />
+      <circle cx="17" cy="19.5" r="1.4" />
+    </svg>
+  );
+}
 export function IconReceipt({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" className={className} {...stroke}>
@@ -138,6 +147,7 @@ export const NAV_ITEMS: NavCardDef[] = [
   { href: "/products", title: "جستجوی کالا", desc: "مقایسه شرایط ویزیتورها", tone: "violet", Icon: IconBox },
   { href: "/price-requests", title: "درخواست قیمت", desc: "مقایسه زنده پاسخ‌ها", tone: "amber", Icon: IconBanknote },
   { href: "/cheques", title: "چک‌ها", desc: "سررسید و یادآوری", tone: "cobalt", Icon: IconCard },
+  { href: "/basket", title: "لیست خرید", desc: "متن سفارش آماده برای هر ویزیتور", tone: "emerald", Icon: IconBasket },
   { href: "/shortages", title: "کسری‌ها", desc: "لیست کالاهای کسری", tone: "pink", Icon: IconAlert },
   { href: "/quick-notes", title: "یادداشت‌ها", desc: "ثبت سریع و پردازش بعداً", tone: "amber", Icon: IconNote },
   { href: "/history", title: "تاریخچه", desc: "تغییرات قیمت و چک‌ها", tone: "muted", Icon: IconClock },
