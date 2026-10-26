@@ -129,8 +129,95 @@ async function navigationHandler(event) {
   });
 }
 
+
+/* ---------- دریافت فایل از «اشتراک‌گذاری» (Web Share Target) ----------
+ * پیام‌رسان‌ها فایل را با POST به /share-target می‌فرستند. فایل در IndexedDB دستگاه نگه داشته می‌شود
+ * و کاربر به /import-share می‌رود (اگر وارد نشده باشد، بعد از ورود همان‌جا برمی‌گردد و فایل از دست نمی‌رود).
+ * نام پایگاه و ساختار باید با src/lib/share-store.ts یکی باشد؛ قواعد نوع/حجم با src/lib/share-detect.ts. */
+
+const SHARE_DB = "pharma-share";
+const SHARE_STORE = "files";
+const SHARE_MAX_BYTES = 3 * 1024 * 1024;
+const SHARE_EXTS = ["pdf", "xlsx", "xls", "csv"];
+const SHARE_MIMES = [
+  "application/pdf",
+  "application/x-pdf",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
+  "application/csv",
+  "text/comma-separated-values",
+];
+const SHARE_KEEP_MS = 24 * 60 * 60 * 1000;
+
+function shareDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SHARE_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(SHARE_STORE)) req.result.createObjectStore(SHARE_STORE, { keyPath: "id" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function shareTx(db, mode, fn) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SHARE_STORE, mode);
+    const r = fn(tx.objectStore(SHARE_STORE));
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+
+function shareProblem(file) {
+  if (!file.size) return "empty";
+  if (file.size > SHARE_MAX_BYTES) return "big";
+  const m = /\.([A-Za-z0-9]{1,5})$/.exec(file.name || "");
+  const ext = m ? m[1].toLowerCase() : "";
+  // پیام‌رسان‌ها گاهی application/octet-stream می‌دهند؛ پسوند نام فایل در اولویت است
+  if (SHARE_EXTS.includes(ext)) return null;
+  const mime = String(file.type || "").toLowerCase().split(";")[0].trim();
+  return SHARE_MIMES.includes(mime) ? null : "type";
+}
+
+async function handleShareTarget(request) {
+  const go = (q) => Response.redirect(new URL("/import-share" + q, self.location.origin).href, 303);
+  try {
+    const form = await request.formData();
+    const files = form.getAll("files").filter((f) => f && typeof f === "object" && "size" in f);
+    if (files.length === 0) return go("?e=empty");
+    const tid = await tenantOf();
+    const db = await shareDb();
+    try {
+      const now = Date.now();
+      const old = await shareTx(db, "readonly", (s) => s.getAll());
+      for (const e of old) if (now - e.at > SHARE_KEEP_MS) await shareTx(db, "readwrite", (s) => s.delete(e.id));
+      let i = 0;
+      for (const f of files.slice(0, 5)) {
+        const problem = shareProblem(f);
+        const id = now.toString(36) + "-" + (i++) + "-" + Math.random().toString(36).slice(2, 8);
+        // فایل مشکل‌دار (نوع/خالی/حجم) فقط به‌صورت پیام نگه داشته می‌شود، نه خود فایل
+        const entry = { id, name: f.name || "file", type: f.type || "", size: f.size, at: now + i, tid };
+        if (problem) entry.problem = problem;
+        else entry.blob = f;
+        await shareTx(db, "readwrite", (s) => s.put(entry));
+      }
+    } finally {
+      db.close();
+    }
+    return go("");
+  } catch {
+    return go("?e=fail");
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
+  if (request.method === "POST") {
+    if (new URL(request.url).pathname === "/share-target") event.respondWith(handleShareTarget(request));
+    return;
+  }
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
