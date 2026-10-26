@@ -8,6 +8,16 @@ import { Field, Input, Button } from "@/components/ui";
 import { RegisterInstall } from "@/components/register-install";
 import { loginAction } from "@/actions/auth";
 
+/** بعد از ورود به صفحه‌ای که کاربر می‌خواست برگردد (فقط مسیر داخلیِ ساده؛ هرچیز دیگر = داشبورد) */
+function safeNext(): string {
+  try {
+    const n = new URLSearchParams(window.location.search).get("next") ?? "";
+    return /^\/[A-Za-z0-9_\-/]*$/.test(n) && !n.startsWith("//") ? n : "/dashboard";
+  } catch {
+    return "/dashboard";
+  }
+}
+
 export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -23,7 +33,7 @@ export function LoginForm() {
     setBusy(false);
     if (res && res.ok) {
       // ناوبری سمت کلاینت — به redirect سمت سرور اتکا نمیکنیم
-      router.push("/dashboard");
+      router.push(safeNext());
       router.refresh();
       return;
     }
