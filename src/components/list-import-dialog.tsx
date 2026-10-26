@@ -25,7 +25,7 @@ const ROLE_FA: Record<string, string> = {
 };
 
 /** فقط «ساختار» فایل گزارش می‌شود (عنوان ستون‌ها و شمارش)، هرگز نام کالا یا قیمت */
-function reportStructure(tag: string, r: ParseResult | null, err?: string) {
+export function reportStructure(tag: string, r: ParseResult | null, err?: string) {
   const msg = r
     ? `[list-import] ${tag} ${r.format} rows=${r.rows.length} susp=${r.suspicious} conf=${r.confidence} pages=${r.pages} cols=${r.columns.map((c) => `${c.label}:${c.role}`).join(",")}`
     : `[list-import] ${tag} ${err ?? ""}`;
@@ -37,7 +37,7 @@ function reportStructure(tag: string, r: ParseResult | null, err?: string) {
   }).catch(() => undefined);
 }
 
-async function readFile(file: File): Promise<ParseResult> {
+export async function readFile(file: File): Promise<ParseResult> {
   const buf = await file.arrayBuffer();
   if (/\.pdf$/i.test(file.name)) {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
