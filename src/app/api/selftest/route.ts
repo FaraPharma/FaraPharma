@@ -49,6 +49,10 @@ import {
   placeBasketOrderAction,
 } from "@/actions/basket";
 import { groupBasket, basketGroupText, basketGroupOrder, parseQty, type BasketItem } from "@/lib/basket";
+import { POST as shareTargetPOST, GET as shareTargetGET } from "@/app/share-target/route";
+import { GET as shareVisitorsGET } from "@/app/api/import-share/visitors/route";
+import { SHARE_MAX_BYTES, classifyShareFile, detectVisitor, orderChoices, type Detection, type VisitorCand } from "@/lib/share-detect";
+import { listAgeInfo } from "@/lib/product-search";
 
 /**
  * مسیر آزمایشیِ موقت برای آزمون‌های مرحله‌ی سفارش — فقط مدیر، فقط با ?confirm=yes.
@@ -133,9 +137,9 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ ?stage=search آزمون جستجوی قیمت کالا (۴۱ تا ۵۰)؛ ?stage=basket آزمون لیست خرید (۵۱ تا ۵۹)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ ?stage=search آزمون جستجوی قیمت کالا (۴۱ تا ۵۰)؛ ?stage=basket آزمون لیست خرید (۵۱ تا ۵۹)؛ ?stage=share آزمون ورود لیست از اشتراک‌گذاری (۶۰ تا ۶۸)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
-  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" || stageParam === "search" || stageParam === "basket" ? stageParam : "all";
+  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" || stageParam === "search" || stageParam === "basket" || stageParam === "share" ? stageParam : "all";
   const t0All = Date.now();
 
   const pool = new Pool({
@@ -2057,6 +2061,248 @@ export async function GET(request: NextRequest) {
           clearSearchCache();
         }
       }
+
+      // ================= آزمون ورود لیست از اشتراک‌گذاری (stage=share) =================
+      // داده‌ی ساختگی فقط در داروخانه‌ی آزمایشی B (و یک ویزیتور طعمه با نام یکتا در A برای آزمون جداسازی)؛ همه در finally پاک می‌شود.
+      // رفتار واقعی اشتراک‌گذاری در اندروید (پیام‌رسان ← اپ نصب‌شده) خودکار قابل‌آزمون نیست؛ راهنمای تست دستی در گزارش آمده است.
+      if (stage === "share") {
+        const tenantB = S.userB as string;
+        const adminTok = request.cookies.get(AUTH_COOKIE)?.value;
+        const adminTid = request.cookies.get("pharma_tid")?.value;
+        const store = await cookies();
+        const opts = { sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30 };
+        const VN_A = "داروسازان";
+        const VN_B = "پخش البرز";
+        const VN_C = "سلامت گستر";
+        const decoyName = `SELFTEST-A-SH-${stamp}`;
+        const ids: { vA?: string; vB?: string; vC?: string; decoy?: string } = {};
+        let seedErr: string | null = null;
+        const readAsset = async (path: string): Promise<string> => {
+          const env = (getCloudflareContext() as unknown as { env?: { ASSETS?: { fetch(r: Request): Promise<Response> }; WORKER_SELF_REFERENCE?: { fetch(r: Request): Promise<Response> } } }).env;
+          const target = env?.ASSETS ?? env?.WORKER_SELF_REFERENCE;
+          if (!target) throw new Error("دسترسی به فایل‌های ثابت در این محیط نیست");
+          const res = await target.fetch(new Request(`${origin}${path}`));
+          if (!res.ok) throw new Error(`${path} کد ${res.status}`);
+          return res.text();
+        };
+        try {
+          const mkVisitor = async (tenant: string, name: string) =>
+            String((await pool.query("INSERT INTO visitors (tenant_id, name) VALUES ($1, $2) RETURNING id", [tenant, name])).rows[0].id);
+          ids.vA = await mkVisitor(tenantB, VN_A);
+          ids.vB = await mkVisitor(tenantB, VN_B);
+          ids.vC = await mkVisitor(tenantB, VN_C);
+          ids.decoy = await mkVisitor(A, decoyName);
+          // داروسازان: لیست ۱۲ روز پیش وارد شده + فایل قبلی؛ سلامت گستر: فقط یک فایل ۳ روز پیش؛ البرز: هیچ
+          const p = String(
+            (await pool.query("INSERT INTO products (tenant_id, name) VALUES ($1, $2) RETURNING id", [tenantB, `کالای آزمون اشتراک ${stamp}`])).rows[0].id
+          );
+          await pool.query(
+            "INSERT INTO visitor_products (tenant_id, visitor_id, product_id, stock, price, last_import_id, updated_at) VALUES ($1, $2, $3, 'in', 1000, $4, now() - make_interval(hours => 289))",
+            [tenantB, ids.vA, p, crypto.randomUUID()]
+          );
+          await pool.query(
+            "INSERT INTO catalog_files (tenant_id, visitor_id, file_name, file_key, mime_type, size_bytes, status, created_at) VALUES ($1, $2, $3, $4, 'application/pdf', 10, 'stored', now() - make_interval(hours => 289))",
+            [tenantB, ids.vA, "لیست قیمت داروسازان ۱۴۰۵-۰۶.xlsx", `selftest/share-a-${stamp}`]
+          );
+          await pool.query(
+            "INSERT INTO catalog_files (tenant_id, visitor_id, file_name, file_key, mime_type, size_bytes, status, created_at) VALUES ($1, $2, $3, $4, 'application/pdf', 10, 'stored', now() - make_interval(hours => 73))",
+            [tenantB, ids.vC, "گستر.pdf", `selftest/share-c-${stamp}`]
+          );
+        } catch (e) {
+          seedErr = errMsg(e);
+        }
+        const needSeed = () => {
+          if (seedErr) throw new Error(`آماده‌سازی داده‌ی آزمایشی ناموفق: ${seedErr}`);
+        };
+        const asB = async <T>(fn: () => Promise<T>): Promise<T> => {
+          try {
+            const tokB = await signSession({ sub: tenantB, tid: tenantB, role: "owner", email: S.emailB as string });
+            store.set(AUTH_COOKIE, tokB, { ...opts, httpOnly: true });
+            store.set("pharma_tid", tenantB, { ...opts, httpOnly: false });
+            return await fn();
+          } finally {
+            if (adminTok) store.set(AUTH_COOKIE, adminTok, { ...opts, httpOnly: true });
+            if (adminTid) store.set("pharma_tid", adminTid, { ...opts, httpOnly: false });
+          }
+        };
+        const candsOf = async (who: "B" | "A"): Promise<VisitorCand[]> => {
+          const read = async () => {
+            const res = await shareVisitorsGET();
+            const j = await getJson(res);
+            if (res.status !== 200) throw new Error(`/api/import-share/visitors کد ${res.status}: ${String(j.error ?? "")}`);
+            return (j.visitors ?? []) as VisitorCand[];
+          };
+          return who === "B" ? asB(read) : read();
+        };
+        try {
+          // ---------- ۶۰) manifest ----------
+          await test("۶۰) manifest.json دارای share_target درست (action، method، enctype، فایل‌ها با mime و پسوند)", async () => {
+            const m = JSON.parse(await readAsset("/manifest.json")) as Json;
+            const st = m.share_target as Json | undefined;
+            const acc: string[] = st?.params?.files?.[0]?.accept ?? [];
+            const need = ["application/pdf", ".pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx", "application/vnd.ms-excel", ".xls", "text/csv", ".csv"];
+            const missing = need.filter((x) => !acc.includes(x));
+            const pass =
+              st?.action === "/share-target" && st?.method === "POST" && st?.enctype === "multipart/form-data" &&
+              st?.params?.files?.[0]?.name === "files" && missing.length === 0 &&
+              m.start_url === "/dashboard" && Array.isArray(m.icons) && m.icons.length >= 3;
+            return { pass, detail: pass ? "share_target (POST، multipart، فیلد files) با pdf/xlsx/xls/csv هم mime هم پسوند؛ بقیه‌ی manifest سالم" : `action=${st?.action} method=${st?.method} enctype=${st?.enctype} فیلد=${st?.params?.files?.[0]?.name} کم‌شده=[${missing.join("،")}]` };
+          });
+
+          // ---------- ۶۱) sw.js ----------
+          await test("۶۱) sw.js مسیر /share-target را مدیریت می‌کند و کش network-first و نسخه‌ی خودکار سالم مانده", async () => {
+            const sw = await readAsset("/sw.js");
+            const must: Array<[string, string]> = [
+              ["مسیر /share-target", '"/share-target"'],
+              ["رویداد POST", 'request.method === "POST"'],
+              ["خواندن فرم چندبخشی", "formData()"],
+              ["ذخیره در IndexedDB", "indexedDB.open"],
+              ["پایگاه pharma-share", '"pharma-share"'],
+              ["ریدایرکت به /import-share", "/import-share"],
+              ["سقف ۳MB", "3 * 1024 * 1024"],
+              ["network-first", "async function networkFirst"],
+              ["cache-first", "async function cacheFirst"],
+              ["نسخه‌ی خودکار از ?v=", 'searchParams.get("v")'],
+              ["فقط GET در مسیر عادی", 'request.method !== "GET"'],
+              ["API هنوز network-first", 'url.pathname.startsWith("/api/")'],
+            ];
+            const missing = must.filter(([, t]) => !sw.includes(t)).map(([n]) => n);
+            return { pass: missing.length === 0, detail: missing.length === 0 ? "هندلر اشتراک‌گذاری هست و network-first، cache-first، نسخه‌ی خودکار و فقط‌GET عادی دست‌نخورده‌اند" : `ناقص: ${missing.join("، ")}` };
+          });
+
+          // ---------- ۶۲) مسیر سروری جایگزین ----------
+          await test("۶۲) مسیر سروری /share-target بدون سرویس‌ورکر: پیام فارسی، نه ۴۰۵ و نه ۵۰۰", async () => {
+            const fd = new FormData();
+            fd.append("files", new File([new Uint8Array([1, 2, 3])], "لیست قیمت.xlsx", { type: "application/octet-stream" }));
+            const post = await shareTargetPOST(new Request(`${origin}/share-target`, { method: "POST", body: fd }));
+            const html = await post.text();
+            const post2 = await shareTargetPOST(new Request(`${origin}/share-target`, { method: "POST", body: "نه-چندبخشی" }));
+            const get = await shareTargetGET(new Request(`${origin}/share-target`));
+            const pass =
+              post.status === 200 && (post.headers.get("content-type") ?? "").includes("text/html") && html.includes("از دکمه‌ی آپلود استفاده کنید") &&
+              post2.status === 200 && get.status === 303 && (get.headers.get("location") ?? "").endsWith("/import-share");
+            return { pass, detail: pass ? "POST با فایل ساختگی و با بدنه‌ی نامعتبر هر دو ۲۰۰ با پیام «از دکمه‌ی آپلود استفاده کنید»؛ GET به /import-share می‌رود" : `POST=${post.status} POST2=${post2.status} GET=${get.status} پیام=${html.includes("از دکمه‌ی آپلود استفاده کنید")}` };
+          });
+
+          // ---------- ۶۳) نوع و حجم ----------
+          await test("۶۳) بررسی فایل: پسوند/mime درست، octet-stream با پسوند، خالی، نوع ناشناخته، بیش از سقف ۳MB", async () => {
+            const c = (n: string, m: string, s: number) => classifyShareFile(n, m, s);
+            const okXlsxOctet = c("لیست.xlsx", "application/octet-stream", 1000);
+            const okPdfNoExt = c("لیست", "application/pdf", 1000);
+            const okUpper = c("PRICE.XLSX", "", 1000);
+            const okCsvMime = c("price", "text/csv; charset=utf-8", 1000);
+            const docx = c("لیست.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 1000);
+            const empty = c("a.pdf", "application/pdf", 0);
+            const big = c("a.pdf", "application/pdf", SHARE_MAX_BYTES + 1);
+            const edge = c("a.pdf", "application/pdf", SHARE_MAX_BYTES);
+            const pass =
+              okXlsxOctet.ok && okXlsxOctet.ext === "xlsx" && okPdfNoExt.ok && okPdfNoExt.fileName === "لیست.pdf" && okUpper.ok && okCsvMime.ok && okCsvMime.fileName === "price.csv" &&
+              !docx.ok && docx.problem === "type" && !empty.ok && empty.problem === "empty" && !big.ok && big.problem === "big" && big.message.includes("۳ مگابایت") && edge.ok;
+            return { pass, detail: pass ? "نوع/خالی/حجم با پیام فارسی رد شد؛ octet-stream با پسوند و pdf بدون پسوند پذیرفته شد؛ دقیقاً ۳MB مجاز است" : JSON.stringify({ okXlsxOctet, okPdfNoExt, okUpper, okCsvMime, docx, empty, big, edge }) };
+          });
+
+          // ---------- ۶۴) تشخیص ویزیتور (نام‌های واقع‌گرایانه) ----------
+          await test("۶۴) تشخیص ویزیتور از نام فایل: مطمئن، مبهم، تکراری، ناشناس، فایل تکراری، آخرین‌استفاده‌شده اول", async () => {
+            const day = 86_400_000;
+            const t = Date.now();
+            const C: VisitorCand[] = [
+              { id: "1", name: "داروسازان", lastFileName: "لیست قیمت داروسازان ۱۴۰۵-۰۶.xlsx", lastImportAt: new Date(t - 5 * day).toISOString() },
+              { id: "2", name: "پخش البرز دارو", lastImportAt: new Date(t - 2 * day).toISOString() },
+              { id: "3", name: "البرز شمال", lastImportAt: new Date(t - 9 * day).toISOString() },
+              { id: "4", name: "سلامت گستر", company: "گروه دارویی سلامت گستر" },
+              { id: "5", name: "کیمیا", lastImportAt: new Date(t - 1 * day).toISOString() },
+              { id: "6", name: "کیمیا" },
+              { id: "7", name: "فرادارو", lastFileName: "export (1).xlsx" },
+            ];
+            const d1 = detectVisitor("لیست قیمت داروسازان ۱۴۰۵-۰۷.xlsx", C);
+            const d2 = detectVisitor("pricelist-سلامت گستر-1405.pdf", C);
+            const d3 = detectVisitor("قیمت البرز ۱۴۰۵.xlsx", C);
+            const d4 = detectVisitor("کیمیا.xlsx", C);
+            const d5 = detectVisitor("report_final(3).pdf", C);
+            const d6 = detectVisitor("لیست قیمت داروسازان ۱۴۰۵-۰۶.xlsx", C);
+            const d7 = detectVisitor("export (2).xlsx", C);
+            const d8 = detectVisitor("WhatsApp Document 2026-10-24 at 10.21.pdf", C);
+            const order = orderChoices(C, d5).map((v) => v.id).join("");
+            const top2 = (d: Detection) => d.matches.slice(0, 2).map((m) => m.visitor.id).sort().join(",");
+            const pass =
+              d1.status === "sure" && d1.best?.visitor.id === "1" &&
+              d2.status === "sure" && d2.best?.visitor.id === "4" &&
+              d3.status === "ambiguous" && top2(d3) === "2,3" &&
+              d4.status === "ambiguous" && d4.matches[0]?.visitor.id === "5" && d4.matches[1]?.visitor.id === "6" &&
+              d5.status === "none" && d8.status === "none" &&
+              d6.status === "sure" && d6.best?.visitor.id === "1" &&
+              d7.status === "ambiguous" && d7.best?.visitor.id === "7" &&
+              order.startsWith("5213");
+            return { pass, detail: pass ? "«داروسازان ۱۴۰۵-۰۷» ← مطمئن؛ «البرز» ← مبهم (دو نامزد)؛ «کیمیا» تکراری ← مبهم با آخرین‌استفاده‌شده اول؛ «report_final» ← ناشناس؛ همان نام فایل قبلی ← مطمئن" : JSON.stringify({ d1: [d1.status, d1.best?.visitor.id], d2: [d2.status, d2.best?.visitor.id], d3: [d3.status, top2(d3)], d4: [d4.status, d4.matches.map((m) => m.visitor.id)], d5: d5.status, d6: [d6.status, d6.best?.visitor.id], d7: [d7.status, d7.best?.visitor.id], d8: d8.status, order }) };
+          });
+
+          // ---------- ۶۵) نامزدها از دیتابیس ----------
+          await test("۶۵) /api/import-share/visitors: آخرین فایل و زمان آخرین ورود هر ویزیتور؛ فقط ویزیتورهای همین داروخانه", async () => {
+            needSeed();
+            const list = await candsOf("B");
+            const dbIds = await pool.query("SELECT id FROM visitors WHERE tenant_id = $1", [tenantB]);
+            const want = new Set(dbIds.rows.map((r) => String(r.id)));
+            const got = new Set(list.map((v) => v.id));
+            const a = list.find((v) => v.id === ids.vA);
+            const b = list.find((v) => v.id === ids.vB);
+            const c = list.find((v) => v.id === ids.vC);
+            const pass =
+              want.size === got.size && [...want].every((x) => got.has(x)) &&
+              a?.lastFileName === "لیست قیمت داروسازان ۱۴۰۵-۰۶.xlsx" && listAgeInfo(a?.lastImportAt).ageDays === 12 &&
+              b?.lastFileName === null && b?.lastImportAt === null &&
+              c?.lastFileName === "گستر.pdf" && listAgeInfo(c?.lastImportAt).ageDays === 3;
+            return { pass, detail: pass ? "داروسازان: فایل قبلی و ۱۲ روز؛ البرز: بدون فایل؛ سلامت گستر: فقط فایل (۳ روز)؛ هیچ ویزیتور بیگانه‌ای نیامد" : `تعداد=${got.size}/${want.size} A=${a?.lastFileName}/${a?.lastImportAt} B=${b?.lastFileName}/${b?.lastImportAt} C=${c?.lastFileName}/${c?.lastImportAt}` };
+          });
+
+          // ---------- ۶۶) تشخیص روی داده‌ی زنده ----------
+          await test("۶۶) تشخیص ویزیتور روی فهرست واقعیِ همین داروخانه (نام فایل‌های واقع‌گرایانه)", async () => {
+            needSeed();
+            const list = await candsOf("B");
+            const a = detectVisitor("لیست قیمت داروسازان ۱۴۰۵-۰۷.xlsx", list);
+            const b = detectVisitor("قیمت پخش البرز ۰۷.pdf", list);
+            const c = detectVisitor("سلامت-گستر.xls", list);
+            const d = detectVisitor("unknown_123.xlsx", list);
+            const pass =
+              a.status === "sure" && a.best?.visitor.id === ids.vA && b.status === "sure" && b.best?.visitor.id === ids.vB &&
+              c.status === "sure" && c.best?.visitor.id === ids.vC && d.status === "none";
+            return { pass, detail: pass ? "هر سه نام فایل به ویزیتور درست رسید و نام ناشناس «ناشناس» ماند" : JSON.stringify({ a: [a.status, a.best?.visitor.name], b: [b.status, b.best?.visitor.name], c: [c.status, c.best?.visitor.name], d: d.status }) };
+          });
+
+          // ---------- ۶۷) ثبت با مسیر ورود فعلی ----------
+          await test("۶۷) ثبت با همان مسیر ورود فعلی: جدید/به‌روز/ناموجود و جایگزینی لیست قبلی در ورود دوم", async () => {
+            needSeed();
+            const row = (name: string, price: number) => ({ name, price, qty: 5, unit: "عدد" });
+            const first = await asB(() => importVisitorListAction({ visitorId: ids.vB as string, rows: [row(`اشتراک الف ${stamp}`, 1000), row(`اشتراک ب ${stamp}`, 2000), row(`اشتراک ج ${stamp}`, 3000)] }));
+            const second = await asB(() => importVisitorListAction({ visitorId: ids.vB as string, rows: [row(`اشتراک الف ${stamp}`, 1500), row(`اشتراک د ${stamp}`, 4000)] }));
+            const db = await pool.query(
+              "SELECT p.name AS n, vp.stock AS s, vp.price AS pr FROM visitor_products vp JOIN products p ON p.id = vp.product_id WHERE vp.tenant_id = $1 AND vp.visitor_id = $2 ORDER BY p.name",
+              [tenantB, ids.vB]
+            );
+            const by = (suffix: string) => db.rows.find((r) => String(r.n).includes(`اشتراک ${suffix}`));
+            const pass =
+              first.ok === true && first.newProducts === 3 && second.ok === true && second.newProducts === 1 && second.updated === 1 && second.markedOut === 2 &&
+              by("الف")?.pr === 1500 && by("ب")?.s === "out" && by("ج")?.s === "out" && by("د")?.pr === 4000;
+            return { pass, detail: pass ? "ورود اول ۳ کالای جدید؛ ورود دوم ۱ جدید، ۱ به‌روز، ۲ ناموجود (لیست قبلی جایگزین شد)" : `اول=${JSON.stringify(first)} دوم=${JSON.stringify(second)} ردیف‌ها=${db.rows.map((r) => `${r.n}:${r.s}:${r.pr}`).join("؛ ")}` };
+          });
+
+          // ---------- ۶۸) جداسازی tenant ----------
+          await test("۶۸) جداسازی داروخانه‌ها: ویزیتور داروخانه‌ی دیگر در تشخیص نمی‌آید", async () => {
+            needSeed();
+            const asBList = await candsOf("B");
+            const asAList = await candsOf("A");
+            const leaked = asBList.some((v) => v.id === ids.decoy || v.name === decoyName);
+            const aSees = asAList.some((v) => v.id === ids.decoy);
+            const det = detectVisitor(`لیست قیمت ${decoyName}.xlsx`, asBList);
+            const pass = !leaked && aSees && !(det.best && det.best.visitor.id === ids.decoy);
+            return { pass, detail: pass ? "ویزیتور طعمه‌ی A فقط برای خودش دیده شد و در فهرستِ B و تشخیص آن نیامد" : `نشت به B=${leaked} | A دید=${aSees}` };
+          });
+        } finally {
+          await pool.query("DELETE FROM catalog_files WHERE file_key LIKE $1", [`selftest/share-%-${stamp}`]).catch(() => undefined);
+          if (ids.decoy) await pool.query("DELETE FROM visitors WHERE id = $1 AND tenant_id = $2", [ids.decoy, A]).catch(() => undefined);
+          await pool.query("DELETE FROM visitors WHERE tenant_id = $1 AND id = ANY($2::uuid[])", [tenantB, [ids.vA, ids.vB, ids.vC].filter(Boolean)]).catch(() => undefined);
+          await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]).catch(() => undefined);
+        }
+      }
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -2114,7 +2360,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : stage === "basket" ? 10 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : stage === "basket" ? 10 : stage === "share" ? 10 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
