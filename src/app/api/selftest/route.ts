@@ -2271,18 +2271,51 @@ export async function GET(request: NextRequest) {
           // ---------- ۶۷) ثبت با مسیر ورود فعلی ----------
           await test("۶۷) ثبت با همان مسیر ورود فعلی: جدید/به‌روز/ناموجود و جایگزینی لیست قبلی در ورود دوم", async () => {
             needSeed();
+            const nA = `اشتراک الف ${stamp}`;
+            const nB = `اشتراک ب ${stamp}`;
+            const nC = `اشتراک ج ${stamp}`;
+            const nD = `اشتراک د ${stamp}`;
             const row = (name: string, price: number) => ({ name, price, qty: 5, unit: "عدد" });
-            const first = await asB(() => importVisitorListAction({ visitorId: ids.vB as string, rows: [row(`اشتراک الف ${stamp}`, 1000), row(`اشتراک ب ${stamp}`, 2000), row(`اشتراک ج ${stamp}`, 3000)] }));
-            const second = await asB(() => importVisitorListAction({ visitorId: ids.vB as string, rows: [row(`اشتراک الف ${stamp}`, 1500), row(`اشتراک د ${stamp}`, 4000)] }));
+            const first = await asB(() => importVisitorListAction({ visitorId: ids.vB as string, rows: [row(nA, 1000), row(nB, 2000), row(nC, 3000)] }));
+            const second = await asB(() => importVisitorListAction({ visitorId: ids.vB as string, rows: [row(nA, 1500), row(nD, 4000)] }));
             const db = await pool.query(
-              "SELECT p.name AS n, vp.stock AS s, vp.price AS pr FROM visitor_products vp JOIN products p ON p.id = vp.product_id WHERE vp.tenant_id = $1 AND vp.visitor_id = $2 ORDER BY p.name",
+              "SELECT p.name AS n, vp.stock AS s, vp.price AS pr FROM visitor_products vp JOIN products p ON p.id = vp.product_id WHERE vp.tenant_id = $1 AND vp.visitor_id = $2",
               [tenantB, ids.vB]
             );
-            const by = (suffix: string) => db.rows.find((r) => String(r.n).includes(`اشتراک ${suffix}`));
-            const pass =
-              first.ok === true && first.newProducts === 3 && second.ok === true && second.newProducts === 1 && second.updated === 1 && second.markedOut === 2 &&
-              by("الف")?.pr === 1500 && by("ب")?.s === "out" && by("ج")?.s === "out" && by("د")?.pr === 4000;
-            return { pass, detail: pass ? "ورود اول ۳ کالای جدید؛ ورود دوم ۱ جدید، ۱ به‌روز، ۲ ناموجود (لیست قبلی جایگزین شد)" : `اول=${JSON.stringify(first)} دوم=${JSON.stringify(second)} ردیف‌ها=${db.rows.map((r) => `${r.n}:${r.s}:${r.pr}`).join("؛ ")}` };
+            // مقدار خام pg به عدد/متن نرمال می‌شود (ستون‌های عددی ممکن است رشته برگردند)
+            const rowOf = (name: string) => db.rows.find((r) => String(r.n) === name);
+            const priceOf = (name: string) => {
+              const r = rowOf(name);
+              return r ? Number(r.pr) : null;
+            };
+            const stockOf = (name: string) => {
+              const r = rowOf(name);
+              return r ? String(r.s) : null;
+            };
+            // هر شرط: [نام، انتظار، مقدار واقعی]
+            const checks: Array<[string, unknown, unknown]> = [
+              ["ورود اول ok", true, first.ok],
+              ["ورود اول: کالای جدید", 3, first.newProducts],
+              ["ورود دوم ok", true, second.ok],
+              ["ورود دوم: کالای جدید", 1, second.newProducts],
+              ["ورود دوم: به‌روز", 1, second.updated],
+              ["ورود دوم: ناموجود", 2, second.markedOut],
+              ["قیمت «الف» بعد از ورود دوم", 1500, priceOf(nA)],
+              ["موجودی «الف»", "in", stockOf(nA)],
+              ["موجودی «ب» (در لیست دوم نیست)", "out", stockOf(nB)],
+              ["موجودی «ج» (در لیست دوم نیست)", "out", stockOf(nC)],
+              ["قیمت «د» (کالای تازه)", 4000, priceOf(nD)],
+              ["موجودی «د»", "in", stockOf(nD)],
+              ["تعداد ردیف‌های این ویزیتور", 4, db.rows.length],
+            ];
+            const bad = checks.filter(([, want, got]) => want !== got);
+            return {
+              pass: bad.length === 0,
+              detail:
+                bad.length === 0
+                  ? "ورود اول ۳ کالای جدید؛ ورود دوم ۱ جدید، ۱ به‌روز، ۲ ناموجود؛ قیمت و موجودی همه‌ی ردیف‌ها درست (لیست قبلی جایگزین شد)"
+                  : bad.map(([n, want, got]) => `${n}: انتظار ${JSON.stringify(want)}، واقعی ${JSON.stringify(got)}`).join(" | "),
+            };
           });
 
           // ---------- ۶۸) جداسازی tenant ----------
