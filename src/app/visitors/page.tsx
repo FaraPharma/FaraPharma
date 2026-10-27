@@ -190,10 +190,10 @@ export default function VisitorsPage() {
   }
 
   async function removeVisitor(v: Visitor) {
-    if (!confirm(`ویزیتور «${v.name}» و همه داده‌هایش حذف شود؟`)) return;
+    if (!confirm(`ویزیتور «${v.name}» و همه داده‌هایش (و کالاهایی که فقط او داشته) حذف شود؟`)) return;
     const res = await deleteVisitorAction(v.id);
     if (res.ok) {
-      toast.success("حذف شد");
+      toast.success(res.removedProducts ? `حذف شد؛ ${faNum(res.removedProducts)} کالای بدون ویزیتور هم پاک شد` : "حذف شد");
       setSelected(null);
       load();
     } else toast.error(res.error ?? "خطا");
