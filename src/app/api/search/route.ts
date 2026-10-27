@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and, ilike, or, ne, sql } from "drizzle-orm";
+import { eq, and, ilike, or, ne, sql, inArray, isNotNull } from "drizzle-orm";
 import { AppError, withTenant, type Tx } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import { visitors, products, visitorProducts, quickNotes } from "@/db/schema";
@@ -12,6 +12,8 @@ import {
   setCachedEntries,
   type SearchEntry,
 } from "@/lib/product-search";
+import { lastBuyFor, priceTrend } from "@/lib/purchase-history";
+import { loadLastPurchases } from "@/lib/purchase-history-db";
 
 export const dynamic = "force-dynamic";
 
@@ -77,12 +79,12 @@ export async function GET(req: NextRequest) {
     const ctx = await requireAuth();
     const q = (req.nextUrl.searchParams.get("q") ?? "").trim();
     if (q.length < 2) {
-      return NextResponse.json({ visitors: [], products: [], notes: [] });
+      return NextResponse.json({ visitors: [], products: [], notes: [], terms: {} });
     }
     const like = `%${q}%`;
 
     const data = await withTenant(ctx, async (tx) => {
-      const [visitorRows, productRows, noteRows] = await Promise.all([
+      const [visitorRows, productResult, noteRows] = await Promise.all([
         tx
           .select({
             id: visitors.id,
@@ -98,7 +100,29 @@ export async function GET(req: NextRequest) {
           )
           .limit(8),
 
-        loadEntries(tx, ctx.tenantId).then((entries) => searchEntries(entries, q)),
+        loadEntries(tx, ctx.tenantId).then(async (entries) => {
+          const hits = searchEntries(entries, q);
+          const terms: Record<string, string> = {};
+          if (hits.length === 0) return { hits: [], terms };
+          // «دفعه‌ی قبل» و یادداشت ویزیتورها برای همه‌ی نتیجه‌ها یک‌جا (نه یکی‌یکی)
+          const visitorIds = [...new Set(hits.map((h) => h.visitorId))];
+          const [last, termRows] = await Promise.all([
+            loadLastPurchases(tx, ctx.tenantId),
+            tx
+              .select({ id: visitors.id, note: visitors.noteTerms })
+              .from(visitors)
+              .where(and(eq(visitors.tenantId, ctx.tenantId), inArray(visitors.id, visitorIds), isNotNull(visitors.noteTerms))),
+          ]);
+          for (const t of termRows) if (t.note) terms[t.id] = t.note;
+          const now = Date.now();
+          return {
+            hits: hits.map((h) => {
+              const lastBuy = lastBuyFor(last, h.productName, now);
+              return { ...h, lastBuy, trend: lastBuy ? priceTrend(h.price, lastBuy.price) : null };
+            }),
+            terms,
+          };
+        }),
 
         tx
           .select({ id: quickNotes.id, body: quickNotes.body })
@@ -108,7 +132,7 @@ export async function GET(req: NextRequest) {
           )
           .limit(8),
       ]);
-      return { visitors: visitorRows, products: productRows, notes: noteRows };
+      return { visitors: visitorRows, products: productResult.hits, terms: productResult.terms, notes: noteRows };
     });
 
     return NextResponse.json(data);
