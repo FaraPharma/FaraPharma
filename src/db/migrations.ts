@@ -1227,6 +1227,20 @@ async function basketItemsTable(c: Queryable): Promise<MigrationResult> {
   return { tables: "basket_items" };
 }
 
+/**
+ * مهاجرت ۰۲۲ (افزودنی): یادداشت آفر و شرایط پرداخت هر ویزیتور (متن آزاد، حداکثر ۵۰۰ نویسه؛ فقط نمایش و ذخیره)
+ * + شاخص برای خواندن یک‌جای «آخرین خرید هر کالا» از سفارش‌ها. هیچ ستون یا داده‌ای حذف نمی‌شود.
+ */
+async function visitorNoteTerms(c: Queryable): Promise<MigrationResult> {
+  await c.query(`
+    ALTER TABLE visitors ADD COLUMN IF NOT EXISTS note_terms text;
+    ALTER TABLE visitors DROP CONSTRAINT IF EXISTS visitors_note_terms_len;
+    ALTER TABLE visitors ADD CONSTRAINT visitors_note_terms_len CHECK (note_terms IS NULL OR char_length(note_terms) <= 500);
+    CREATE INDEX IF NOT EXISTS order_items_tenant_name_idx ON order_items (tenant_id, product_name);
+  `);
+  return { tables: "visitors.note_terms" };
+}
+
 /** به ترتیب اجرا می‌شوند؛ نام‌ها پس از ثبت نباید عوض شوند. مهاجرت جدید را فقط به انتها اضافه کنید. */
 export const MIGRATIONS: Migration[] = [
   sqlMigration("001_base_tables", TABLES_DDL),
@@ -1252,6 +1266,7 @@ export const MIGRATIONS: Migration[] = [
   { name: "019_catalog_file_chunks", up: catalogFileChunksTable },
   { name: "020_visitor_products_list_columns", up: visitorProductsListColumns },
   { name: "021_basket_items", up: basketItemsTable },
+  { name: "022_visitor_note_terms", up: visitorNoteTerms },
 ];
 
 export const MIGRATION_NAMES = MIGRATIONS.map((m) => m.name);

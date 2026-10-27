@@ -65,6 +65,8 @@ export const visitors = pgTable(
     phone: text("phone"),
     // آیدی پیامرسان (بدون @) — مشترک برای تلگرام/بله/روبیکا
     messengerUsername: text("messenger_username"),
+    // آفر و شرایط پرداخت (متن آزاد، حداکثر ۵۰۰ نویسه؛ فقط نمایش — هیچ محاسبه‌ای روی آن نیست)
+    noteTerms: text("note_terms"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -447,7 +449,10 @@ export const orderItems = pgTable(
     unitPrice: integer("unit_price").notNull().default(0),
     discountPct: integer("discount_pct").notNull().default(0),
   },
-  (t) => [index("order_items_idx").on(t.tenantId, t.orderId)]
+  (t) => [
+    index("order_items_idx").on(t.tenantId, t.orderId),
+    index("order_items_tenant_name_idx").on(t.tenantId, t.productName),
+  ]
 );
 
 /* ------------------------------------------------------------------ */
