@@ -16,6 +16,8 @@ export interface Visitor {
   company: string | null;
   phone: string | null;
   messengerUsername: string | null;
+  /** آفر و شرایط پرداخت (متن آزاد) */
+  noteTerms: string | null;
   createdAt: string;
 }
 

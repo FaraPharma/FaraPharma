@@ -1,6 +1,7 @@
 import type { Order, OrderItem } from "@/lib/types";
 import { faNum, toman } from "@/lib/format";
 import { listAgeInfo } from "@/lib/product-search";
+import { lastBuyFor, priceTrend, type LastBuyInfo, type LastPurchase, type PriceTrend } from "@/lib/purchase-history";
 
 /**
  * لیست خرید (سبد): توابع خالص برای ساخت نما، گروه‌بندی بر اساس ویزیتور، متن آماده‌ی ارسال و تبدیل به سفارش.
@@ -35,6 +36,12 @@ export interface BasketItem {
   /** ویزیتور انتخابی دیگر این کالا را موجود ندارد (بعد از ورود لیست تازه) */
   visitorOut: boolean;
   alternatives: BasketAlt[];
+  /** آخرین خرید واقعی همین کالا (از سفارش‌های ثبت‌شده)؛ بدون سابقه = null */
+  lastBuy: LastBuyInfo | null;
+  /** گران‌تر/ارزان‌تر شدن قیمت فعلی نسبت به آخرین خرید (فقط بیش از ۵٪) */
+  trend: PriceTrend;
+  /** آفر و شرایط پرداخت ویزیتورِ انتخاب‌شده (فقط نمایش) */
+  visitorNote: string | null;
 }
 
 export interface BasketGroup {
@@ -50,6 +57,8 @@ export interface BasketGroup {
   stale: boolean;
   /** فقط گروهِ دارای ویزیتور را می‌شود سفارش داد یا فرستاد */
   orderable: boolean;
+  /** آفر و شرایط پرداخت ویزیتور (فقط نمایش داخل اپ؛ در متن سفارش نمی‌آید) */
+  note: string | null;
 }
 
 /** «امروز / دیروز / ۱۲ روز پیش» برای سن لیست */
@@ -107,7 +116,8 @@ export function buildBasketItems(
   rows: RawBasketRow[],
   available: RawAvailable[],
   listAt: Map<string, string | null>,
-  now = Date.now()
+  now = Date.now(),
+  extras: { last?: Map<string, LastPurchase>; notes?: Map<string, string | null> } = {}
 ): BasketItem[] {
   const byProduct = new Map<string, BasketAlt[]>();
   for (const a of available) {
@@ -124,6 +134,9 @@ export function buildBasketItems(
   return rows.map((r) => {
     const alternatives = byProduct.get(r.productId) ?? [];
     const info = listAgeInfo(r.visitorId ? listAt.get(r.visitorId) ?? null : null, now);
+    const lastBuy = extras.last ? lastBuyFor(extras.last, r.productName, now) : null;
+    // قیمت فعلی = قیمت همین ویزیتور در لیست امروزش (اگر نبود، قیمت لحظه‌ی افزودن)
+    const currentPrice = alternatives.find((a) => a.visitorId === r.visitorId)?.price ?? r.price;
     return {
       id: r.id,
       productId: r.productId,
@@ -137,6 +150,9 @@ export function buildBasketItems(
       unavailable: alternatives.length === 0,
       visitorOut: r.visitorId !== null && !alternatives.some((a) => a.visitorId === r.visitorId),
       alternatives,
+      lastBuy,
+      trend: lastBuy ? priceTrend(currentPrice, lastBuy.price) : null,
+      visitorNote: r.visitorId ? extras.notes?.get(r.visitorId) ?? null : null,
     };
   });
 }
@@ -159,6 +175,7 @@ export function groupBasket(items: BasketItem[]): BasketGroup[] {
         ageDays: it.ageDays,
         stale: it.stale,
         orderable: it.visitorId !== null,
+        note: it.visitorNote,
       };
       map.set(key, g);
     }
