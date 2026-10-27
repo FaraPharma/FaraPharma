@@ -35,6 +35,7 @@ export async function GET() {
               company: visitors.company,
               phone: visitors.phone,
               messengerUsername: visitors.messengerUsername,
+              noteTerms: visitors.noteTerms,
               createdAt: visitors.createdAt,
             })
             .from(visitors)
