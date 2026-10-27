@@ -53,6 +53,9 @@ import { POST as shareTargetPOST, GET as shareTargetGET } from "@/app/share-targ
 import { GET as shareVisitorsGET } from "@/app/api/import-share/visitors/route";
 import { SHARE_MAX_BYTES, classifyShareFile, detectVisitor, orderChoices, type Detection, type VisitorCand } from "@/lib/share-detect";
 import { listAgeInfo } from "@/lib/product-search";
+import { updateVisitorTermsAction } from "@/actions/visitors";
+import { clearHistoryCache } from "@/lib/purchase-history-db";
+import { priceTrend } from "@/lib/purchase-history";
 
 /**
  * مسیر آزمایشیِ موقت برای آزمون‌های مرحله‌ی سفارش — فقط مدیر، فقط با ?confirm=yes.
@@ -137,9 +140,9 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ ?stage=search آزمون جستجوی قیمت کالا (۴۱ تا ۵۰)؛ ?stage=basket آزمون لیست خرید (۵۱ تا ۵۹)؛ ?stage=share آزمون ورود لیست از اشتراک‌گذاری (۶۰ تا ۶۸)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ ?stage=search آزمون جستجوی قیمت کالا (۴۱ تا ۵۰)؛ ?stage=basket آزمون لیست خرید (۵۱ تا ۵۹)؛ ?stage=share آزمون ورود لیست از اشتراک‌گذاری (۶۰ تا ۶۸)؛ ?stage=history آزمون «دفعه‌ی قبل» و یادداشت ویزیتور (۶۹ تا ۷۶)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
-  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" || stageParam === "search" || stageParam === "basket" || stageParam === "share" ? stageParam : "all";
+  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" || stageParam === "search" || stageParam === "basket" || stageParam === "share" || stageParam === "history" ? stageParam : "all";
   const t0All = Date.now();
 
   const pool = new Pool({
@@ -2336,6 +2339,224 @@ export async function GET(request: NextRequest) {
           await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]).catch(() => undefined);
         }
       }
+
+      // ================= آزمون «دفعه‌ی قبل» و یادداشت ویزیتور (stage=history) =================
+      // داده‌ی ساختگی فقط در داروخانه‌ی آزمایشی B (و یک سفارش/یادداشت طعمه با نام یکتا در A برای آزمون جداسازی)؛ همه در finally پاک می‌شود.
+      if (stage === "history") {
+        const tenantB = S.userB as string;
+        const adminTok = request.cookies.get(AUTH_COOKIE)?.value;
+        const adminTid = request.cookies.get("pharma_tid")?.value;
+        const store = await cookies();
+        const opts = { sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30 };
+        const VN = [1, 2, 3, 4].map((i) => `SELFTEST-B-H${i}-${stamp}`);
+        const P1 = "شامپو تاریخچه ۴۰۰";
+        const P2 = "کرم تاریخچه 200";
+        const P2_ORDER_NAME = "\u0662\u0660\u0660 \u0643\u0631\u0645 \u062A\u0627\u0631\u064A\u062E\u0686\u0647"; // «٢٠٠ كرم تاريخچه» با ارقام و حروف عربی و ترتیب متفاوت
+        const P3 = "قطره بی‌سابقه تاریخچه";
+        const FINAL_NOTE = "۶+۱، ۱۰٪ نقد، چک ۲ ماهه";
+        const DECOY_NOTE = `یادداشت طعمه ${stamp}`;
+        const ids: { v: string[]; o3?: string; decoyV?: string; decoyO?: string } = { v: [] };
+        let seedErr: string | null = null;
+        let orderSeq = 9001;
+        try {
+          const mkVisitor = async (tenant: string, name: string, note: string | null = null) =>
+            String((await pool.query("INSERT INTO visitors (tenant_id, name, note_terms) VALUES ($1, $2, $3) RETURNING id", [tenant, name, note])).rows[0].id);
+          const mkProduct = async (name: string) =>
+            String((await pool.query("INSERT INTO products (tenant_id, name) VALUES ($1, $2) RETURNING id", [tenantB, name])).rows[0].id);
+          const link = async (vid: string, pid: string, price: number) =>
+            pool.query(
+              "INSERT INTO visitor_products (tenant_id, visitor_id, product_id, stock, price, qty, unit, last_import_id) VALUES ($1, $2, $3, 'in', $4, 10, 'عدد', $5)",
+              [tenantB, vid, pid, price, crypto.randomUUID()]
+            );
+          const mkOrder = async (tenant: string, vid: string, daysAgo: number, items: Array<[string, number]>, opt: { deleted?: boolean; status?: string; orderNo?: number } = {}) => {
+            const oid = String(
+              (
+                await pool.query(
+                  "INSERT INTO orders (tenant_id, visitor_id, status, order_no, created_at, deleted_at) VALUES ($1, $2, $3, $4, now() - make_interval(hours => $5::int), CASE WHEN $6::boolean THEN now() ELSE NULL END) RETURNING id",
+                  [tenant, vid, opt.status ?? "registered", opt.orderNo ?? orderSeq++, daysAgo * 24 + 1, Boolean(opt.deleted)]
+                )
+              ).rows[0].id
+            );
+            for (const [name, price] of items) {
+              await pool.query("INSERT INTO order_items (tenant_id, order_id, product_name, qty, unit_price) VALUES ($1, $2, $3, 1, $4)", [tenant, oid, name, price]);
+            }
+            return oid;
+          };
+          for (const n of VN) ids.v.push(await mkVisitor(tenantB, n));
+          const [Va, Vb, Vc, Vd] = ids.v;
+          const p1 = await mkProduct(P1);
+          const p2 = await mkProduct(P2);
+          const p3 = await mkProduct(P3);
+          // قیمت‌های فعلی P1 نسبت به آخرین خرید ۱۲۰٬۰۰۰: +۵٪ دقیق، +۵٫۸٪، −۵٫۸٪، −۴٪
+          await link(Va, p1, 126000);
+          await link(Vb, p1, 127000);
+          await link(Vc, p1, 113000);
+          await link(Vd, p1, 115200);
+          await link(Va, p2, 70000);
+          await link(Va, p3, 30000);
+          await mkOrder(tenantB, Va, 50, [[P1, 90000]]);
+          await mkOrder(tenantB, Vc, 30, [[P1, 100000]]);
+          ids.o3 = await mkOrder(tenantB, Vb, 12, [[P1, 120000]]); // آخرین خرید معتبر
+          await mkOrder(tenantB, Va, 2, [[P1, 50000]], { deleted: true }); // سطل بازیافت
+          await mkOrder(tenantB, Vc, 1, [[P1, 70000]], { status: "cancelled" }); // لغوشده
+          await mkOrder(tenantB, Va, 3, [[P1, 0]]); // قیمت ثبت‌نشده
+          await mkOrder(tenantB, Vb, 5, [[P2_ORDER_NAME, 80000]]);
+          ids.decoyV = await mkVisitor(A, `SELFTEST-A-H-${stamp}`, DECOY_NOTE);
+          ids.decoyO = await mkOrder(A, ids.decoyV, 1, [[P1, 1]], { orderNo: 1_900_000_000 + Math.floor(Math.random() * 1_000_000) });
+        } catch (e) {
+          seedErr = errMsg(e);
+        }
+        clearSearchCache();
+        clearHistoryCache();
+        const needSeed = () => {
+          if (seedErr) throw new Error(`آماده‌سازی داده‌ی آزمایشی ناموفق: ${seedErr} — اگر «note_terms» نیست، مهاجرت ۰۲۲ را اجرا کنید`);
+        };
+        const asB = async <T>(fn: () => Promise<T>): Promise<T> => {
+          try {
+            const tokB = await signSession({ sub: tenantB, tid: tenantB, role: "owner", email: S.emailB as string });
+            store.set(AUTH_COOKIE, tokB, { ...opts, httpOnly: true });
+            store.set("pharma_tid", tenantB, { ...opts, httpOnly: false });
+            return await fn();
+          } finally {
+            if (adminTok) store.set(AUTH_COOKIE, adminTok, { ...opts, httpOnly: true });
+            if (adminTid) store.set("pharma_tid", adminTid, { ...opts, httpOnly: false });
+          }
+        };
+        const searchB = async (q: string): Promise<{ products: Json[]; terms: Record<string, string> }> =>
+          asB(async () => {
+            const res = await searchGET(new NextRequest(`${origin}/api/search?q=${encodeURIComponent(q)}`));
+            const j = await getJson(res);
+            if (res.status !== 200) throw new Error(`/api/search کد ${res.status}: ${String(j.error ?? "")}`);
+            return { products: (j.products ?? []) as Json[], terms: (j.terms ?? {}) as Record<string, string> };
+          });
+        const hitOf = (rows: Json[], visitorName: string) => rows.find((r) => r.visitorName === visitorName);
+        const noteOf = async (vid: string) => (await pool.query("SELECT note_terms FROM visitors WHERE id = $1", [vid])).rows[0]?.note_terms as string | null;
+        try {
+          // ---------- ۶۹) آخرین خرید ----------
+          await test("۶۹) «دفعه‌ی قبل»: آخرین خرید واقعی (ویزیتور، قیمت، سن) از بین چند سفارش، برای همه‌ی ردیف‌های نتیجه", async () => {
+            needSeed();
+            const { products } = await searchB(P1);
+            const bad = products.filter((h) => !(h.lastBuy?.visitorName === VN[1] && h.lastBuy?.price === 120000 && h.lastBuy?.ageDays === 12));
+            const pass = products.length === 4 && bad.length === 0;
+            return { pass, detail: pass ? "هر ۴ ردیف نتیجه: آخرین خرید = ویزیتور دوم، ۱۲۰٬۰۰۰، ۱۲ روز پیش (سفارش‌های ۳۰ و ۵۰ روزه قدیمی‌ترند)" : `نتیجه=${products.length} (انتظار ۴) | ناسازگار: ${JSON.stringify(bad.map((h) => [h.visitorName, h.lastBuy]))}` };
+          });
+
+          // ---------- ۷۰) سطل بازیافت و لغوشده ----------
+          await test("۷۰) سفارش حذف‌شده (سطل)، لغوشده و ردیف بدون قیمت حساب نمی‌شود", async () => {
+            needSeed();
+            const first = hitOf((await searchB(P1)).products, VN[0]);
+            await pool.query("UPDATE orders SET deleted_at = now() WHERE id = $1", [ids.o3]);
+            clearHistoryCache();
+            const afterTrash = hitOf((await searchB(P1)).products, VN[0]);
+            await pool.query("UPDATE orders SET deleted_at = NULL, status = 'cancelled' WHERE id = $1", [ids.o3]);
+            clearHistoryCache();
+            const afterCancel = hitOf((await searchB(P1)).products, VN[0]);
+            await pool.query("UPDATE orders SET status = 'registered' WHERE id = $1", [ids.o3]);
+            clearHistoryCache();
+            const restored = hitOf((await searchB(P1)).products, VN[0]);
+            const ok = (h: Json | undefined, v: string, p: number, d: number) => h?.lastBuy?.visitorName === v && h?.lastBuy?.price === p && h?.lastBuy?.ageDays === d;
+            const pass = ok(first, VN[1], 120000, 12) && ok(afterTrash, VN[2], 100000, 30) && ok(afterCancel, VN[2], 100000, 30) && ok(restored, VN[1], 120000, 12);
+            return { pass, detail: pass ? "با سفارشِ ۱۲ روزه در سطل یا لغوشده، خرید ۳۰ روزه (۱۰۰٬۰۰۰) آخرین می‌شود؛ بعد از برگشت دوباره ۱۲۰٬۰۰۰؛ سفارش‌های ۲ و ۱ روزه (سطل/لغو) و ردیف بدون قیمت هیچ‌وقت حساب نشد" : JSON.stringify({ first: first?.lastBuy, afterTrash: afterTrash?.lastBuy, afterCancel: afterCancel?.lastBuy, restored: restored?.lastBuy }) };
+          });
+
+          // ---------- ۷۱) املای متفاوت ----------
+          await test("۷۱) اسم کالا با املای متفاوت (ي/ك، ارقام عربی، ترتیب کلمه‌ها) به همان سابقه می‌رسد", async () => {
+            needSeed();
+            const { products } = await searchB(P2);
+            const h = hitOf(products, VN[0]);
+            const pass = h?.lastBuy?.visitorName === VN[1] && h?.lastBuy?.price === 80000 && h?.lastBuy?.ageDays === 5;
+            return { pass, detail: pass ? "«٢٠٠ كرم تاريخچه» (در سفارش) به «کرم تاریخچه 200» (محصول) رسید: ویزیتور دوم، ۸۰٬۰۰۰، ۵ روز پیش" : `نتیجه=${JSON.stringify(h?.lastBuy)} تعداد=${products.length}` };
+          });
+
+          // ---------- ۷۲) نشان گران/ارزان ----------
+          await test("۷۲) نشان «گران‌تر/ارزان‌تر شد» فقط بیش از ۵٪؛ دقیقاً ۵٪ و کمتر بدون نشان", async () => {
+            needSeed();
+            const { products } = await searchB(P1);
+            const t = (i: number) => hitOf(products, VN[i])?.trend ?? null;
+            const bounds = [priceTrend(105, 100), priceTrend(106, 100), priceTrend(95, 100), priceTrend(94, 100), priceTrend(100, 0), priceTrend(null, 100)].map(String).join(",");
+            const pass = t(0) === null && t(1) === "up" && t(2) === "down" && t(3) === null && bounds === "null,up,null,down,null,null";
+            return { pass, detail: pass ? "+۵٪ دقیق: بدون نشان؛ +۵٫۸٪: گران‌تر؛ −۵٫۸٪: ارزان‌تر؛ −۴٪: بدون نشان" : `ترند: ${[0, 1, 2, 3].map((i) => `${i}=${t(i)}`).join(" ")} مرزها=${bounds}` };
+          });
+
+          // ---------- ۷۳) بدون سابقه ----------
+          await test("۷۳) کالای بدون سابقه‌ی خرید: چیزی برنمی‌گردد (نه خط «قبلاً»، نه نشان)", async () => {
+            needSeed();
+            const { products } = await searchB(P3);
+            const h = hitOf(products, VN[0]);
+            const pass = products.length === 1 && h?.lastBuy === null && h?.trend === null;
+            return { pass, detail: pass ? "lastBuy و trend هر دو null" : `نتیجه=${products.length} lastBuy=${JSON.stringify(h?.lastBuy)} trend=${h?.trend}` };
+          });
+
+          // ---------- ۷۴) ذخیره‌ی یادداشت ----------
+          await test("۷۴) یادداشت ویزیتور: ذخیره، حداکثر ۵۰۰ نویسه، رد بیش از ۵۰۰، پاک‌کردن با متن خالی", async () => {
+            needSeed();
+            const v = ids.v[1];
+            const save = (note: string) => asB(() => updateVisitorTermsAction({ id: v, note }));
+            const r1 = await save(FINAL_NOTE);
+            const db1 = await noteOf(v);
+            const over = await save("ب".repeat(501));
+            const dbOver = await noteOf(v);
+            const r500 = await save("ب".repeat(500));
+            const db500 = await noteOf(v);
+            const empty = await save("   ");
+            const dbEmpty = await noteOf(v);
+            const rFinal = await save(FINAL_NOTE);
+            const dbFinal = await noteOf(v);
+            const checks: Array<[string, unknown, unknown]> = [
+              ["ذخیره‌ی متن فارسی ok", true, r1.ok],
+              ["متن ذخیره‌شده", FINAL_NOTE, db1],
+              ["۵۰۱ نویسه رد شد", false, over.ok],
+              ["بعد از ردِ ۵۰۱ متن قبلی ماند", FINAL_NOTE, dbOver],
+              ["۵۰۰ نویسه ok", true, r500.ok],
+              ["طول ذخیره‌شده‌ی ۵۰۰", 500, db500 ? [...db500].length : null],
+              ["متن خالی ok", true, empty.ok],
+              ["متن خالی = پاک (null)", null, dbEmpty],
+              ["ذخیره‌ی نهایی ok", true, rFinal.ok],
+              ["متن نهایی", FINAL_NOTE, dbFinal],
+            ];
+            const bad = checks.filter(([, want, got]) => want !== got);
+            return { pass: bad.length === 0, detail: bad.length === 0 ? "ذخیره، ۵۰۰ مجاز، ۵۰۱ رد (متن قبلی دست‌نخورده)، خالی = پاک" : bad.map(([n, w, g]) => `${n}: انتظار ${JSON.stringify(w)}، واقعی ${JSON.stringify(g)}`).join(" | ") };
+          });
+
+          // ---------- ۷۵) یادداشت در جستجو و لیست خرید ----------
+          await test("۷۵) یادداشت در نتایج جستجو و در لیست خرید برمی‌گردد (به‌همراه «دفعه‌ی قبل» و نشان)", async () => {
+            needSeed();
+            const { products, terms } = await searchB(P1);
+            const hb = hitOf(products, VN[1]);
+            if (!hb) throw new Error("ردیف ویزیتور دوم در نتایج نیست");
+            const add = await asB(() => addToBasketAction({ conditionId: String(hb.conditionId) }));
+            const items = await asB(async () => {
+              const res = await basketGET();
+              return ((await getJson(res)).items ?? []) as BasketItem[];
+            });
+            const it = items.find((x) => x.productName === P1);
+            const g = groupBasket(items).find((x) => x.visitorId === ids.v[1]);
+            const pass =
+              terms[ids.v[1]] === FINAL_NOTE && Object.keys(terms).every((k) => ids.v.includes(k)) && add.ok === true &&
+              it?.visitorNote === FINAL_NOTE && it?.lastBuy?.price === 120000 && it?.trend === "up" && g?.note === FINAL_NOTE;
+            return { pass, detail: pass ? "جستجو: یادداشت ویزیتور دوم؛ لیست خرید: یادداشت گروه، «قبلاً ۱۲۰٬۰۰۰» و نشان «گران‌تر» (۱۲۷٬۰۰۰)" : `terms=${JSON.stringify(terms)} add=${JSON.stringify(add)} یادداشت=${it?.visitorNote} lastBuy=${JSON.stringify(it?.lastBuy)} trend=${it?.trend} گروه=${g?.note}` };
+          });
+
+          // ---------- ۷۶) جداسازی tenant ----------
+          await test("۷۶) جداسازی داروخانه‌ها: سابقه و یادداشت داروخانه‌ی دیگر دیده یا تغییر داده نمی‌شود", async () => {
+            needSeed();
+            const decoyRows = await pool.query("SELECT (SELECT count(*)::int FROM orders WHERE id = $1) AS o, (SELECT note_terms FROM visitors WHERE id = $2) AS n", [ids.decoyO, ids.decoyV]);
+            const { products, terms } = await searchB(P1);
+            const leakedPrice = products.some((h) => h.lastBuy?.price === 1 || h.lastBuy?.visitorName === `SELFTEST-A-H-${stamp}`);
+            const leakedNote = Object.values(terms).some((t) => t === DECOY_NOTE);
+            const write = await asB(() => updateVisitorTermsAction({ id: ids.decoyV as string, note: "تغییر بیگانه" }));
+            const after = await noteOf(ids.decoyV as string);
+            const pass = decoyRows.rows[0].o === 1 && decoyRows.rows[0].n === DECOY_NOTE && !leakedPrice && !leakedNote && write.ok === false && after === DECOY_NOTE;
+            return { pass, detail: pass ? "سفارش (قیمت ۱) و یادداشت داروخانه‌ی A فقط برای خودش ماند؛ در جستجوی B نیامد و تغییرش از نشست B رد شد" : `طعمه سر جاست=${decoyRows.rows[0].o}/${decoyRows.rows[0].n} | نشت قیمت=${leakedPrice} | نشت یادداشت=${leakedNote} | تغییر=${JSON.stringify(write)} | یادداشت فعلی=${after}` };
+          });
+        } finally {
+          if (ids.decoyV) await pool.query("DELETE FROM visitors WHERE id = $1 AND tenant_id = $2", [ids.decoyV, A]).catch(() => undefined);
+          if (ids.v.length) await pool.query("DELETE FROM visitors WHERE tenant_id = $1 AND id = ANY($2::uuid[])", [tenantB, ids.v]).catch(() => undefined);
+          await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]).catch(() => undefined);
+          clearSearchCache();
+          clearHistoryCache();
+        }
+      }
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -2393,7 +2614,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : stage === "basket" ? 10 : stage === "share" ? 10 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : stage === "basket" ? 10 : stage === "share" ? 10 : stage === "history" ? 9 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
