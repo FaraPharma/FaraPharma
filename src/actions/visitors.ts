@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import { AppError, withTenant } from "@/db";
 import { assertWritable } from "@/db/access";
 import { normalizeUsername } from "@/lib/domain";
@@ -11,6 +11,9 @@ import {
   visitorProductHistory,
   products,
   orders,
+  basketItems,
+  priceRequestItems,
+  priceResponses,
 } from "@/db/schema";
 import { requireAuth } from "@/lib/auth";
 import type { ActionResult } from "@/actions/auth";
@@ -149,10 +152,19 @@ export async function updateVisitorTermsAction(input: { id: string; note: string
   }
 }
 
-export async function deleteVisitorAction(id: string): Promise<ActionResult> {
+export interface DeleteVisitorResult extends ActionResult {
+  /** کالاهایی که فقط همین ویزیتور داشت و همراهش پاک شد */
+  removedProducts?: number;
+}
+
+/**
+ * حذف ویزیتور. کالاهایی که فقط همین ویزیتور داشت و دیگر هیچ ویزیتوری ندارند هم پاک می‌شوند، به‌جز کالایی که
+ * در کسری‌هاست، در لیست خرید است یا در درخواست قیمت استفاده شده (آن‌ها می‌مانند تا چیزی از کاربر گم نشود).
+ */
+export async function deleteVisitorAction(id: string): Promise<DeleteVisitorResult> {
   const ctx = await requireAuth();
   try {
-    await withTenant(ctx, async (tx) => {
+    const removed = await withTenant(ctx, async (tx) => {
       await assertWritable(ctx, tx);
       // سفارش‌ها (حتی داخل سطل بازیافت) با حذف ویزیتور برای همیشه پاک می‌شدند
       const hasOrders = await tx
@@ -166,11 +178,34 @@ export async function deleteVisitorAction(id: string): Promise<ActionResult> {
           409
         );
       }
+      // کالاهای این ویزیتور را قبل از حذف (که ردیف‌هایشان را هم پاک می‌کند) یادداشت کن
+      const mine = await tx
+        .select({ productId: visitorProducts.productId })
+        .from(visitorProducts)
+        .where(and(eq(visitorProducts.visitorId, id), eq(visitorProducts.tenantId, ctx.tenantId)));
+      const candidateIds = [...new Set(mine.map((m) => m.productId))];
       await tx
         .delete(visitors)
         .where(and(eq(visitors.id, id), eq(visitors.tenantId, ctx.tenantId)));
+      if (candidateIds.length === 0) return 0;
+      const gone = await tx
+        .delete(products)
+        .where(
+          and(
+            eq(products.tenantId, ctx.tenantId),
+            inArray(products.id, candidateIds),
+            eq(products.isShort, false),
+            sql`NOT EXISTS (SELECT 1 FROM ${visitorProducts} WHERE ${visitorProducts.productId} = ${products.id})`,
+            sql`NOT EXISTS (SELECT 1 FROM ${visitorProductHistory} WHERE ${visitorProductHistory.productId} = ${products.id})`,
+            sql`NOT EXISTS (SELECT 1 FROM ${basketItems} WHERE ${basketItems.productId} = ${products.id})`,
+            sql`NOT EXISTS (SELECT 1 FROM ${priceRequestItems} WHERE ${priceRequestItems.productId} = ${products.id})`,
+            sql`NOT EXISTS (SELECT 1 FROM ${priceResponses} WHERE ${priceResponses.productId} = ${products.id})`
+          )
+        )
+        .returning({ id: products.id });
+      return gone.length;
     });
-    return { ok: true };
+    return { ok: true, removedProducts: removed };
   } catch (e) {
     if (e instanceof AppError) return { ok: false, error: e.message };
     throw e;
