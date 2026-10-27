@@ -31,6 +31,7 @@ import {
 } from "@/actions/visitors";
 import { bulkAddVisitorProductsAction } from "@/actions/visitorProducts";
 import { ListImportDialog, ConditionDetails } from "@/components/list-import-dialog";
+import { VisitorTermsField } from "@/components/visitor-terms-field";
 import { normalizeFa } from "@/lib/list-import";
 import { whatsappUrl, telegramUrl, baleUrl, rubikaUrl } from "@/lib/domain";
 import { cn, faDate, faDateTime, faNum, toman, toNum } from "@/lib/format";
@@ -626,6 +627,17 @@ export default function VisitorsPage() {
                 </Button>
               </div>
             </div>
+
+            {/* آفر و شرایط پرداخت (فقط متن) */}
+            <VisitorTermsField
+              key={selected.id}
+              visitorId={selected.id}
+              initial={selected.noteTerms}
+              onSaved={(note) => {
+                setSelected({ ...selected, noteTerms: note });
+                void load();
+              }}
+            />
 
             {/* Conditions */}
             <section>
