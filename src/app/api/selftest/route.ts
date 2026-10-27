@@ -140,9 +140,9 @@ export async function GET(request: NextRequest) {
   const stamp = crypto.randomUUID().slice(0, 8);
   const visitorName = `SELFTEST-${stamp}`;
   const origin = new URL(request.url).origin;
-  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ ?stage=search آزمون جستجوی قیمت کالا (۴۱ تا ۵۰)؛ ?stage=basket آزمون لیست خرید (۵۱ تا ۵۹)؛ ?stage=share آزمون ورود لیست از اشتراک‌گذاری (۶۰ تا ۶۸)؛ ?stage=history آزمون «دفعه‌ی قبل» و یادداشت ویزیتور (۶۹ تا ۷۶)؛ پیش‌فرض: ۱ تا ۲۱
+  // ?stage=old فقط ۱ تا ۱۴؛ ?stage=new فقط ۱۵ تا ۲۱؛ ?stage=app تشخیص خطاهای نقش app_runtime (۲۲ تا ۲۵)؛ ?stage=sec آزمون‌های امنیتی قفل IP/ارتقای نقش/سابقه‌ی مدیر (۲۶ تا ۴۰)؛ ?stage=search آزمون جستجوی قیمت کالا (۴۱ تا ۵۰)؛ ?stage=basket آزمون لیست خرید (۵۱ تا ۵۹)؛ ?stage=share آزمون ورود لیست از اشتراک‌گذاری (۶۰ تا ۶۸)؛ ?stage=history آزمون «دفعه‌ی قبل» و یادداشت ویزیتور (۶۹ تا ۷۶)؛ ?stage=delete آزمون حذف ویزیتور و کالاهایش (۷۷ تا ۸۲)؛ پیش‌فرض: ۱ تا ۲۱
   const stageParam = new URL(request.url).searchParams.get("stage");
-  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" || stageParam === "search" || stageParam === "basket" || stageParam === "share" || stageParam === "history" ? stageParam : "all";
+  const stage = stageParam === "old" || stageParam === "new" || stageParam === "app" || stageParam === "sec" || stageParam === "search" || stageParam === "basket" || stageParam === "share" || stageParam === "history" || stageParam === "delete" ? stageParam : "all";
   const t0All = Date.now();
 
   const pool = new Pool({
@@ -2557,6 +2557,125 @@ export async function GET(request: NextRequest) {
           clearHistoryCache();
         }
       }
+
+      // ================= آزمون حذف ویزیتور و کالاهایش (stage=delete) =================
+      // داده‌ی ساختگی فقط در داروخانه‌ی آزمایشی B (و یک ویزیتور/کالای طعمه با نام یکتا در A)؛ همه در finally پاک می‌شود.
+      if (stage === "delete") {
+        const tenantB = S.userB as string;
+        const adminTok = request.cookies.get(AUTH_COOKIE)?.value;
+        const adminTid = request.cookies.get("pharma_tid")?.value;
+        const store = await cookies();
+        const opts = { sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 30 };
+        const ids: Record<string, string> = {};
+        let seedErr: string | null = null;
+        try {
+          const mkVisitor = async (tenant: string, name: string) =>
+            String((await pool.query("INSERT INTO visitors (tenant_id, name) VALUES ($1, $2) RETURNING id", [tenant, name])).rows[0].id);
+          const mkProduct = async (tenant: string, name: string, short = false) =>
+            String((await pool.query("INSERT INTO products (tenant_id, name, is_short) VALUES ($1, $2, $3) RETURNING id", [tenant, name, short])).rows[0].id);
+          const link = async (tenant: string, vid: string, pid: string) =>
+            pool.query("INSERT INTO visitor_products (tenant_id, visitor_id, product_id, stock, price) VALUES ($1, $2, $3, 'in', 1000)", [tenant, vid, pid]);
+          ids.v1 = await mkVisitor(tenantB, `SELFTEST-B-D1-${stamp}`);
+          ids.v2 = await mkVisitor(tenantB, `SELFTEST-B-D2-${stamp}`);
+          ids.v3 = await mkVisitor(tenantB, `SELFTEST-B-D3-${stamp}`);
+          ids.pA = await mkProduct(tenantB, `فقط ویزیتور اول ${stamp}`);
+          ids.pB = await mkProduct(tenantB, `مشترک بین دو ویزیتور ${stamp}`);
+          ids.pC = await mkProduct(tenantB, `کالای کسری ${stamp}`, true);
+          ids.pD = await mkProduct(tenantB, `کالای داخل لیست خرید ${stamp}`);
+          ids.pF = await mkProduct(tenantB, `کالای بدون ویزیتور ${stamp}`);
+          ids.pG = await mkProduct(tenantB, `کالای ویزیتور سفارش‌دار ${stamp}`);
+          await link(tenantB, ids.v1, ids.pA);
+          await link(tenantB, ids.v1, ids.pB);
+          await link(tenantB, ids.v2, ids.pB);
+          await link(tenantB, ids.v1, ids.pC);
+          await link(tenantB, ids.v1, ids.pD);
+          await link(tenantB, ids.v3, ids.pG);
+          await pool.query("INSERT INTO basket_items (tenant_id, product_id, product_name, visitor_id, qty, price) VALUES ($1, $2, $3, $4, 1, 1000)", [tenantB, ids.pD, `کالای داخل لیست خرید ${stamp}`, ids.v1]);
+          await pool.query("INSERT INTO orders (tenant_id, visitor_id, status, order_no) VALUES ($1, $2, 'registered', 9701)", [tenantB, ids.v3]);
+          ids.dv = await mkVisitor(A, `SELFTEST-A-D-${stamp}`);
+          ids.dp = await mkProduct(A, `کالای طعمه حذف ${stamp}`);
+          await pool.query("INSERT INTO visitor_products (tenant_id, visitor_id, product_id, stock, price) VALUES ($1, $2, $3, 'in', 1)", [A, ids.dv, ids.dp]);
+        } catch (e) {
+          seedErr = errMsg(e);
+        }
+        const needSeed = () => {
+          if (seedErr) throw new Error(`آماده‌سازی داده‌ی آزمایشی ناموفق: ${seedErr}`);
+        };
+        const asB = async <T>(fn: () => Promise<T>): Promise<T> => {
+          try {
+            const tokB = await signSession({ sub: tenantB, tid: tenantB, role: "owner", email: S.emailB as string });
+            store.set(AUTH_COOKIE, tokB, { ...opts, httpOnly: true });
+            store.set("pharma_tid", tenantB, { ...opts, httpOnly: false });
+            return await fn();
+          } finally {
+            if (adminTok) store.set(AUTH_COOKIE, adminTok, { ...opts, httpOnly: true });
+            if (adminTid) store.set("pharma_tid", adminTid, { ...opts, httpOnly: false });
+          }
+        };
+        const exists = async (table: "products" | "visitors", id: string) =>
+          ((await pool.query(`SELECT count(*)::int AS n FROM ${table} WHERE id = $1`, [id])).rows[0].n as number) === 1;
+        let del: Awaited<ReturnType<typeof deleteVisitorAction>> | null = null;
+        try {
+          // ---------- ۷۷) کالای فقط‌مالِ ویزیتور ----------
+          await test("۷۷) حذف ویزیتور: کالایی که فقط او داشت پاک می‌شود (و فقط همان)", async () => {
+            needSeed();
+            del = await asB(() => deleteVisitorAction(ids.v1));
+            const checks: Array<[string, unknown, unknown]> = [
+              ["حذف ok", true, del.ok],
+              ["تعداد کالای پاک‌شده", 1, del.removedProducts],
+              ["ویزیتور پاک شد", false, await exists("visitors", ids.v1)],
+              ["کالای فقط‌مالِ او پاک شد", false, await exists("products", ids.pA)],
+            ];
+            const bad = checks.filter(([, w, g]) => w !== g);
+            return { pass: bad.length === 0, detail: bad.length === 0 ? "ویزیتور و تنها کالای مخصوص او پاک شد؛ ۱ کالا گزارش شد" : bad.map(([n, w, g]) => `${n}: انتظار ${JSON.stringify(w)}، واقعی ${JSON.stringify(g)}`).join(" | ") };
+          });
+
+          // ---------- ۷۸) کالای مشترک ----------
+          await test("۷۸) کالایی که ویزیتور دیگری هم دارد می‌ماند و شرایط ویزیتور دیگر دست‌نخورده است", async () => {
+            needSeed();
+            const vp = await pool.query("SELECT visitor_id FROM visitor_products WHERE product_id = $1", [ids.pB]);
+            const pass = (await exists("products", ids.pB)) && vp.rows.length === 1 && vp.rows[0].visitor_id === ids.v2;
+            return { pass, detail: pass ? "کالای مشترک ماند و فقط ردیف ویزیتور دوم باقی است" : `کالا=${await exists("products", ids.pB)} ردیف‌ها=${JSON.stringify(vp.rows)}` };
+          });
+
+          // ---------- ۷۹) کسری و لیست خرید ----------
+          await test("۷۹) کالای داخل کسری‌ها یا لیست خرید نمی‌ماند گم؛ ردیف لیست خرید بدون ویزیتور می‌ماند", async () => {
+            needSeed();
+            const short = await pool.query("SELECT is_short FROM products WHERE id = $1", [ids.pC]);
+            const basket = await pool.query("SELECT visitor_id FROM basket_items WHERE product_id = $1", [ids.pD]);
+            const pass = short.rows[0]?.is_short === true && (await exists("products", ids.pD)) && basket.rows.length === 1 && basket.rows[0].visitor_id === null;
+            return { pass, detail: pass ? "کالای کسری ماند؛ کالای لیست خرید و ردیفش ماند (ویزیتور خالی)" : `کسری=${JSON.stringify(short.rows)} لیست خرید=${JSON.stringify(basket.rows)}` };
+          });
+
+          // ---------- ۸۰) کالای بی‌ارتباط ----------
+          await test("۸۰) کالایی که هیچ‌وقت مالِ این ویزیتور نبود دست نمی‌خورد", async () => {
+            needSeed();
+            const pass = await exists("products", ids.pF);
+            return { pass, detail: pass ? "کالای بدون ویزیتورِ قبلی سر جایش ماند" : "کالای بی‌ارتباط پاک شده بود" };
+          });
+
+          // ---------- ۸۱) ویزیتور سفارش‌دار ----------
+          await test("۸۱) ویزیتور دارای سفارش حذف نمی‌شود و کالاهایش دست‌نخورده می‌ماند", async () => {
+            needSeed();
+            const r = await asB(() => deleteVisitorAction(ids.v3));
+            const pass = r.ok === false && (r.error ?? "").includes("سفارش") && (await exists("visitors", ids.v3)) && (await exists("products", ids.pG));
+            return { pass, detail: pass ? "حذف با پیام «سفارش ثبت‌شده دارد» رد شد؛ ویزیتور و کالایش ماندند" : `نتیجه=${JSON.stringify(r)} ویزیتور=${await exists("visitors", ids.v3)} کالا=${await exists("products", ids.pG)}` };
+          });
+
+          // ---------- ۸۲) جداسازی tenant ----------
+          await test("۸۲) جداسازی داروخانه‌ها: حذف از نشست B ویزیتور و کالای داروخانه‌ی A را تغییر نمی‌دهد", async () => {
+            needSeed();
+            const r = await asB(() => deleteVisitorAction(ids.dv));
+            const vp = await pool.query("SELECT count(*)::int AS n FROM visitor_products WHERE visitor_id = $1", [ids.dv]);
+            const pass = r.ok === true && r.removedProducts === 0 && (await exists("visitors", ids.dv)) && (await exists("products", ids.dp)) && vp.rows[0].n === 1;
+            return { pass, detail: pass ? "ویزیتور، کالا و شرایط داروخانه‌ی A دست‌نخورده ماند (۰ کالا پاک شد)" : `نتیجه=${JSON.stringify(r)} ویزیتورA=${await exists("visitors", ids.dv)} کالاA=${await exists("products", ids.dp)} ردیف=${vp.rows[0].n}` };
+          });
+        } finally {
+          await pool.query("DELETE FROM visitors WHERE id = ANY($1::uuid[])", [[ids.dv, ids.v1, ids.v2, ids.v3].filter(Boolean)]).catch(() => undefined);
+          if (ids.dp) await pool.query("DELETE FROM products WHERE id = $1 AND tenant_id = $2", [ids.dp, A]).catch(() => undefined);
+          await pool.query("DELETE FROM products WHERE tenant_id = $1", [tenantB]).catch(() => undefined);
+        }
+      }
     }
   } finally {
     // ---------- پاک‌سازی (همیشه) ----------
@@ -2614,7 +2733,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : stage === "basket" ? 10 : stage === "share" ? 10 : stage === "history" ? 9 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : stage === "basket" ? 10 : stage === "share" ? 10 : stage === "history" ? 9 : stage === "delete" ? 7 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
