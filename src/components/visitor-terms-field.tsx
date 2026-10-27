@@ -7,7 +7,7 @@ import { faNum } from "@/lib/format";
 
 const MAX = 500;
 
-/** آفر و شرایط پرداخت ویزیتور (مثل «۶+۱، ۱۰٪ نقد، چک ۲ ماهه»): فقط متن؛ هیچ محاسبه‌ای انجام نمی‌شود. بعد از خروج از کادر خودکار ذخیره می‌شود. */
+/** شرایط تسویه و آفر ویزیتور (مثل «۶+۱، ۱۰٪ نقد، چک ۲ ماهه»): یک‌بار برای کل ویزیتور، بدون انتخاب محصول؛ فقط متن و بدون هیچ محاسبه‌ای. بعد از خروج از کادر خودکار ذخیره می‌شود. */
 export function VisitorTermsField({
   visitorId,
   initial,
@@ -43,10 +43,10 @@ export function VisitorTermsField({
   }
 
   return (
-    <section className="space-y-1.5">
+    <section className="space-y-1.5 rounded-2xl border p-3" style={{ borderColor: "var(--primary)", background: "var(--primary-soft)" }}>
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-bold" style={{ color: "var(--ink)" }}>
-          آفر و شرایط پرداخت
+          شرایط تسویه و آفر
         </h3>
         <span className="text-[11px]" style={{ color: count > MAX ? "var(--danger-ink)" : "var(--ink-soft)" }}>
           {faNum(count)} / {faNum(MAX)}
@@ -61,7 +61,7 @@ export function VisitorTermsField({
           setText([...e.target.value].slice(0, MAX).join(""));
         }}
         onBlur={() => void save()}
-        aria-label="آفر و شرایط پرداخت"
+        aria-label="شرایط تسویه و آفر"
       />
       <div className="flex items-center gap-2">
         {dirty && (
@@ -75,7 +75,7 @@ export function VisitorTermsField({
           </span>
         )}
         <span className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
-          فقط برای نمایش در جستجو و لیست خرید است؛ محاسبه‌ای روی آن انجام نمی‌شود.
+          یک‌بار برای کل ویزیتور؛ در جستجو و لیست خرید نشان داده می‌شود. محاسبه‌ای روی آن انجام نمی‌شود.
         </span>
       </div>
     </section>
