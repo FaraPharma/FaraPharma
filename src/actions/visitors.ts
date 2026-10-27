@@ -120,6 +120,35 @@ export async function updateVisitorAction(input: {
   }
 }
 
+const VISITOR_TERMS_MAX = 500;
+
+/** یادداشت آفر و شرایط پرداخت ویزیتور: فقط ذخیره (متن آزاد، حداکثر ۵۰۰ نویسه؛ خالی = پاک) */
+export async function updateVisitorTermsAction(input: { id: string; note: string }): Promise<ActionResult> {
+  const ctx = await requireAuth();
+  const note = String(input.note ?? "")
+    .replace(/\u0000/g, "")
+    .replace(/\r\n?/g, "\n")
+    .trim();
+  if ([...note].length > VISITOR_TERMS_MAX) {
+    return { ok: false, error: `یادداشت حداکثر ${VISITOR_TERMS_MAX} نویسه می‌تواند باشد` };
+  }
+  try {
+    const r = await withTenant(ctx, async (tx) => {
+      await assertWritable(ctx, tx);
+      return tx
+        .update(visitors)
+        .set({ noteTerms: note === "" ? null : note, updatedAt: new Date() })
+        .where(and(eq(visitors.id, input.id), eq(visitors.tenantId, ctx.tenantId)))
+        .returning({ id: visitors.id });
+    });
+    if (!r[0]) return { ok: false, error: "ویزیتور یافت نشد" };
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof AppError) return { ok: false, error: e.message };
+    throw e;
+  }
+}
+
 export async function deleteVisitorAction(id: string): Promise<ActionResult> {
   const ctx = await requireAuth();
   try {
