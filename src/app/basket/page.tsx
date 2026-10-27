@@ -15,6 +15,7 @@ import {
 } from "@/actions/basket";
 import { copyText, exportOrderExcel, exportOrderPdf } from "@/lib/export";
 import { faNum, toman } from "@/lib/format";
+import { LastBuyLine, TermsLine, TrendBadge } from "@/components/purchase-hints";
 import {
   basketGroupOrder,
   basketGroupText,
@@ -182,6 +183,12 @@ export default function BasketPage() {
                 {g.hasPrices && <Badge color="slate">{toman(g.totalAmount)}</Badge>}
               </div>
 
+              {g.note && (
+                <div className="rounded-xl bg-[color:var(--line)] px-3 py-1">
+                  <TermsLine text={g.note} />
+                </div>
+              )}
+
               {g.visitorId && g.stale && (
                 <p className="rounded-xl bg-[color:var(--warning-soft)] px-3 py-2 text-xs font-medium leading-5 text-[color:var(--warning-ink)]">
                   لیست این ویزیتور {faNum(g.ageDays ?? 0)} روز قدیمی است؛ قیمت‌ها را قبل از سفارش بررسی کن.
@@ -200,9 +207,11 @@ export default function BasketPage() {
                       <div className="text-xs font-bold leading-5 text-[color:var(--ink)]">{it.productName}</div>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[color:var(--ink-soft)]">
                         {it.price !== null && <span>قیمت هنگام افزودن: {toman(it.price)}</span>}
+                        <TrendBadge trend={it.trend} />
                         {it.unavailable && <Badge color="red">ناموجود نزد همه</Badge>}
                         {!it.unavailable && it.visitorOut && <Badge color="amber">نزد این ویزیتور ناموجود شد</Badge>}
                       </div>
+                      <LastBuyLine lastBuy={it.lastBuy} />
                       {it.alternatives.length > 0 && (
                         <button
                           type="button"
