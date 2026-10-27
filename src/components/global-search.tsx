@@ -4,6 +4,8 @@ import { IconClose } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { LastBuyLine, TermsLine, TrendBadge } from "@/components/purchase-hints";
+import type { LastBuyInfo, PriceTrend } from "@/lib/purchase-history";
 import { addToBasketAction } from "@/actions/basket";
 import { toman, faNum } from "@/lib/format";
 
@@ -21,7 +23,11 @@ interface SearchResults {
     ageDays: number | null;
     stale: boolean;
     cheapest: boolean;
+    lastBuy: LastBuyInfo | null;
+    trend: PriceTrend;
   }>;
+  /** آفر و شرایط پرداخت ویزیتورها (کلید = شناسه‌ی ویزیتور) */
+  terms: Record<string, string>;
   notes: Array<{ id: string; body: string }>;
 }
 
@@ -188,7 +194,8 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                     <div>
                       <div className="mb-1.5 text-[10px] font-bold" style={{ color: "var(--ink-soft)" }}>محصولات</div>
                       {results!.products.map((p) => (
-                        <div key={p.conditionId} className="flex items-center gap-1.5">
+                        <div key={p.conditionId}>
+                        <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => go("/products")}
                           className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-right transition hover:bg-[color:var(--line)]"
@@ -214,6 +221,7 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                                 {toman(p.price)}
                               </span>
                             )}
+                            <TrendBadge trend={p.trend} />
                             {p.cheapest && (
                               <span
                                 className="rounded-full px-2 text-[10px] font-bold"
@@ -233,6 +241,13 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                         >
                           {added.has(p.conditionId) ? "افزوده شد" : "افزودن"}
                         </button>
+                        </div>
+                        {(p.lastBuy || results!.terms?.[p.visitorId]) && (
+                          <div className="space-y-0.5 px-2.5 pb-1.5">
+                            <LastBuyLine lastBuy={p.lastBuy} />
+                            <TermsLine text={results!.terms?.[p.visitorId]} />
+                          </div>
+                        )}
                         </div>
                       ))}
                     </div>
