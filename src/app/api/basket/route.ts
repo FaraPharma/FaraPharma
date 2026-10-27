@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { AppError, withTenant } from "@/db";
 import { requireAuth } from "@/lib/auth";
 import { basketItems, products, visitorProducts, visitors } from "@/db/schema";
 import { logServerError } from "@/lib/log";
 import { loadListAges } from "@/lib/list-age";
 import { buildBasketItems } from "@/lib/basket";
+import { loadLastPurchases } from "@/lib/purchase-history-db";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,8 @@ export async function GET() {
         .where(eq(basketItems.tenantId, ctx.tenantId))
         .orderBy(asc(basketItems.addedAt), asc(basketItems.id));
       if (rows.length === 0) return [];
-      const [available, listAt] = await Promise.all([
+      const visitorIds = [...new Set(rows.map((r) => r.visitorId).filter((v): v is string => v !== null))];
+      const [available, listAt, last, noteRows] = await Promise.all([
         tx
           .select({
             productId: visitorProducts.productId,
@@ -48,8 +50,16 @@ export async function GET() {
             )
           ),
         loadListAges(tx, ctx.tenantId),
+        loadLastPurchases(tx, ctx.tenantId),
+        visitorIds.length === 0
+          ? Promise.resolve([] as Array<{ id: string; note: string | null }>)
+          : tx
+              .select({ id: visitors.id, note: visitors.noteTerms })
+              .from(visitors)
+              .where(and(eq(visitors.tenantId, ctx.tenantId), inArray(visitors.id, visitorIds), isNotNull(visitors.noteTerms))),
       ]);
-      return buildBasketItems(rows, available, listAt);
+      const notes = new Map<string, string | null>(noteRows.map((n) => [n.id, n.note]));
+      return buildBasketItems(rows, available, listAt, Date.now(), { last, notes });
     });
     return NextResponse.json({ items });
   } catch (e) {
