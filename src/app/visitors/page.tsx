@@ -76,8 +76,14 @@ export default function VisitorsPage() {
   const [q, setQ] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<Visitor | null>(null);
+  const selectedId = selected?.id ?? null;
   const [editVisitor, setEditVisitor] = useState<Visitor | null>(null);
   const [condOpen, setCondOpen] = useState<{ visitorId: string; initial: Condition | null } | null>(null);
+  // بخش جمع‌شده‌ی «پیشرفته» (فرم قدیمی شرایط هر محصول)؛ مسیر اصلیِ شرایط، کادر «شرایط تسویه و آفر» است
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  useEffect(() => {
+    setAdvancedOpen(false);
+  }, [selectedId]);
   const [noteText, setNoteText] = useState("");
   const [busy, setBusy] = useState(false);
   const [catBusy, setCatBusy] = useState(false);
@@ -643,14 +649,6 @@ export default function VisitorsPage() {
             <section>
               <div className="mb-2 flex items-center justify-between gap-2">
                 <h3 className="text-sm font-bold" style={{ color: "var(--ink)" }}>کاتالوگ این ویزیتور</h3>
-                <button
-                  type="button"
-                  onClick={() => setCondOpen({ visitorId: selected.id, initial: null })}
-                  className="text-[11px] font-bold"
-                  style={{ color: "var(--primary-dark)" }}
-                >
-                  تنظیمات پیشرفته (موجودی، انقضا...) +
-                </button>
               </div>
 
               {/* تب‌های ورود سریع: تایپ تکی / پیست لیست / آپلود اکسل */}
@@ -856,11 +854,13 @@ export default function VisitorsPage() {
                             />
                           </div>
                           <div className="flex shrink-0 gap-1">
+                            {advancedOpen && (
                             <button
                               onClick={() => setCondOpen({ visitorId: selected.id, initial: c })}
                               className="grid size-7 place-items-center rounded-lg bg-[color:var(--line)] text-xs"
                             >
                                                           </button>
+                            )}
                             <button
                               onClick={() => removeCondition(c.id)}
                               className="grid size-7 place-items-center rounded-lg bg-[color:var(--danger-soft)] text-xs"
@@ -881,6 +881,31 @@ export default function VisitorsPage() {
                   )}
                 </div>
               )}
+
+              {/* پیشرفته: فرم قدیمی شرایط هر محصول (انتخاب محصول لازم دارد)؛ از مسیر اصلی کنار گذاشته شده */}
+              <details
+                open={advancedOpen}
+                onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+                className="mt-3 rounded-2xl border px-3"
+                style={{ borderColor: "var(--line)" }}
+              >
+                <summary className="flex min-h-11 cursor-pointer items-center text-xs font-bold" style={{ color: "var(--ink-soft)" }}>
+                  پیشرفته: تنظیم دقیق یک محصول
+                </summary>
+                <div className="space-y-2 pb-3">
+                  <p className="text-[11px] leading-5" style={{ color: "var(--ink-soft)" }}>
+                    شرایط تسویه و آفرِ کلی ویزیتور را در کادر «شرایط تسویه و آفر» بالای همین صفحه بنویس. این بخش فقط برای تنظیم
+                    دقیق یک محصول است (موجودی، انقضا، تخفیف، چک…) و با بازشدنش دکمه‌ی ویرایش کنار هر کالا هم نمایش داده می‌شود.
+                  </p>
+                  <Button
+                    variant="secondary"
+                    className="w-full text-xs"
+                    onClick={() => setCondOpen({ visitorId: selected.id, initial: null })}
+                  >
+                    افزودن / تنظیم یک محصول با فرم کامل
+                  </Button>
+                </div>
+              </details>
             </section>
 
             {importFile && selected && (
