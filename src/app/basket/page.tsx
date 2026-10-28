@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useOfflineData } from "@/hooks/useOfflineData";
@@ -34,6 +34,11 @@ export default function BasketPage() {
   const { data, error, loading, stale, savedAt, reload } = useOfflineData<BasketData>("/api/basket");
   const groups = useMemo(() => groupBasket(data?.items ?? []), [data]);
   const itemCount = data?.items.length ?? 0;
+
+  // نشان تعداد روی نوار پایین با هر تغییر ردیف‌ها به‌روز شود
+  useEffect(() => {
+    window.dispatchEvent(new Event("fara:basket"));
+  }, [itemCount]);
 
   const [withPrice, setWithPrice] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
