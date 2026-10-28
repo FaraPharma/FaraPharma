@@ -1,20 +1,17 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ComponentType, ReactNode } from "react";
+import { toast } from "sonner";
 import { useOfflineData } from "@/hooks/useOfflineData";
 import { PageHeader, Spinner, Button } from "@/components/ui";
-import {
-  IconUsers,
-  IconBox,
-  IconBanknote,
-  IconCard,
-  IconAlert,
-  IconNote,
-  IconClock,
-  IconGear,
-} from "@/components/nav-cards";
-import { GlobalSearch } from "@/components/global-search";
+import { IconBox, IconCard, IconAlert, IconClock, IconGear } from "@/components/nav-cards";
+import { PriceSearch } from "@/components/price-search";
+import { addAllShortagesAction } from "@/actions/basket";
+import { listAgeLabel } from "@/lib/basket";
+import { listAgeInfo } from "@/lib/product-search";
 import {
   compactToman,
   daysLeft,
@@ -114,38 +111,55 @@ function IconRefresh({ className }: { className?: string }) {
   );
 }
 
-/** کارت بزرگ: آیکون، عدد و عنوان */
-function BigCard({
-  href,
-  title,
-  value,
-  Icon,
-}: {
-  href: string;
-  title: string;
-  value: number;
-  Icon: IconType;
-}) {
+/** آخرین لیست‌های واردشده: ویزیتور و چند روز پیش (بدون تغییر داده؛ از همان فهرست ویزیتورها) */
+function RecentLists() {
+  const [rows, setRows] = useState<Array<{ id: string; name: string; at: string }>>([]);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/import-share/visitors")
+      .then(async (res) => {
+        if (!res.ok) return;
+        const j = (await res.json()) as { visitors?: Array<{ id: string; name: string; lastImportAt: string | null }> };
+        if (!alive) return;
+        setRows(
+          (j.visitors ?? [])
+            .filter((v): v is { id: string; name: string; lastImportAt: string } => Boolean(v.lastImportAt))
+            .sort((a, b) => b.lastImportAt.localeCompare(a.lastImportAt))
+            .slice(0, 5)
+            .map((v) => ({ id: v.id, name: v.name, at: v.lastImportAt }))
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (rows.length === 0) return null;
   return (
-    <Link
-      href={href}
-      className="card flex min-h-28 flex-col justify-between p-4 transition active:scale-[0.98]"
-    >
-      <div className="flex items-start justify-between">
-        <div
-          className="grid size-11 place-items-center rounded-2xl"
-          style={{ background: "var(--primary-soft)", color: "var(--primary)" }}
-        >
-          <Icon className="size-6" />
-        </div>
-        <div className="tnum text-2xl font-extrabold" style={{ color: "var(--ink)" }}>
-          {faNum(value)}
-        </div>
+    <section>
+      <h2 className="mb-2 text-sm font-bold" style={{ color: "var(--ink-soft)" }}>
+        آخرین لیست‌های واردشده
+      </h2>
+      <div className="card divide-y divide-[color:var(--line)] overflow-hidden">
+        {rows.map((r) => {
+          const info = listAgeInfo(r.at);
+          return (
+            <Link key={r.id} href="/visitors" className="flex min-h-14 items-center gap-3 px-4">
+              <span className="flex-1 text-sm font-medium" style={{ color: "var(--ink)" }}>
+                {r.name}
+              </span>
+              <span
+                className={info.stale ? "rounded-md px-1.5 text-xs font-bold" : "text-xs"}
+                style={info.stale ? { background: "var(--warning-soft)", color: "var(--warning-ink)" } : { color: "var(--ink-soft)" }}
+              >
+                {listAgeLabel(info.ageDays)}
+              </span>
+              <Chevron />
+            </Link>
+          );
+        })}
       </div>
-      <div className="text-sm font-bold" style={{ color: "var(--ink)" }}>
-        {title}
-      </div>
-    </Link>
+    </section>
   );
 }
 
@@ -216,6 +230,30 @@ function Notice({
 export default function DashboardPage() {
   const { data, error, loading, stale, savedAt, reload } =
     useOfflineData<DashboardData>("/api/dashboard");
+  const router = useRouter();
+  const [adding, setAdding] = useState(false);
+
+  /** همه‌ی کسری‌ها به لیست خرید: برای هر کالا ارزان‌ترین ویزیتور موجود */
+  async function addAllShortages() {
+    setAdding(true);
+    const res = await addAllShortagesAction();
+    setAdding(false);
+    if (!res.ok) {
+      toast.error(res.error ?? "خطا");
+      return;
+    }
+    if ((res.added ?? 0) === 0 && (res.alreadyIn ?? 0) === 0) {
+      toast.error("کسری‌ای برای افزودن نیست");
+      return;
+    }
+    toast.success(
+      `${faNum(res.added ?? 0)} کالا به لیست خرید رفت` +
+        (res.noVisitor ? ` (${faNum(res.noVisitor)} کالا ناموجود نزد همه)` : "") +
+        (res.alreadyIn ? ` — ${faNum(res.alreadyIn)} کالا از قبل در لیست بود` : "")
+    );
+    window.dispatchEvent(new Event("fara:basket"));
+    router.push("/basket");
+  }
 
   if (loading && !data) {
     return (
@@ -278,7 +316,22 @@ export default function DashboardPage() {
         }
       />
 
-      <GlobalSearch variant="field" />
+      <PriceSearch />
+
+      <Button
+        variant="secondary"
+        className="w-full text-sm"
+        onClick={() => void addAllShortages()}
+        disabled={adding || data.counts.shortages === 0}
+      >
+        {adding
+          ? "در حال افزودن…"
+          : data.counts.shortages > 0
+            ? `افزودن همه‌ی کسری‌ها به لیست خرید (${faNum(data.counts.shortages)})`
+            : "افزودن همه‌ی کسری‌ها به لیست خرید"}
+      </Button>
+
+      <RecentLists />
 
       {(subStatus !== "active" || error || stale) && (
         <div className="space-y-2">
@@ -380,25 +433,6 @@ export default function DashboardPage() {
           </p>
         </section>
       )}
-
-      <section>
-        <h2 className="mb-2 text-sm font-bold" style={{ color: "var(--ink-soft)" }}>
-          کارهای پرتکرار
-        </h2>
-        <div className="grid grid-cols-2 gap-3">
-          <BigCard href="/visitors" title="ویزیتورها" value={counts.visitors} Icon={IconUsers} />
-          <BigCard href="/products" title="کالاها" value={counts.products} Icon={IconBox} />
-          <BigCard
-            href="/price-requests"
-            title="درخواست قیمت"
-            value={counts.openRequests}
-            Icon={IconBanknote}
-          />
-          <BigCard href="/cheques" title="چک‌های نزدیک" value={overdue + upcoming} Icon={IconCard} />
-          <BigCard href="/shortages" title="کسری‌ها" value={counts.shortages} Icon={IconAlert} />
-          <BigCard href="/quick-notes" title="یادداشت‌ها" value={notesCount} Icon={IconNote} />
-        </div>
-      </section>
 
       <section className="card divide-y divide-[color:var(--line)] overflow-hidden">
         {[
