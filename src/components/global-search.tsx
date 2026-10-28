@@ -4,50 +4,22 @@ import { IconClose } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { LastBuyLine, TermsLine, TrendBadge } from "@/components/purchase-hints";
-import type { LastBuyInfo, PriceTrend } from "@/lib/purchase-history";
+import { PriceHitRow, type PriceHit } from "@/components/price-hit-row";
 import { addToBasketAction } from "@/actions/basket";
-import { toman, faNum } from "@/lib/format";
 
 interface SearchResults {
   visitors: Array<{ id: string; name: string; company: string | null }>;
-  products: Array<{
-    conditionId: string;
-    productName: string;
-    visitorId: string;
-    visitorName: string;
-    price: number | null;
-    qty: number | null;
-    unit: string | null;
-    stock: string;
-    ageDays: number | null;
-    stale: boolean;
-    cheapest: boolean;
-    lastBuy: LastBuyInfo | null;
-    trend: PriceTrend;
-  }>;
+  products: PriceHit[];
   /** آفر و شرایط پرداخت ویزیتورها (کلید = شناسه‌ی ویزیتور) */
   terms: Record<string, string>;
   notes: Array<{ id: string; body: string }>;
-}
-
-function ageLabel(days: number | null): string {
-  if (days === null) return "بدون تاریخ";
-  if (days <= 0) return "امروز";
-  if (days === 1) return "دیروز";
-  return `${faNum(days)} روز پیش`;
-}
-
-function stockLabel(p: { qty: number | null; unit: string | null; stock: string }): string {
-  if (p.qty !== null && p.qty > 0) return `موجودی ${faNum(p.qty)}${p.unit ? ` ${p.unit}` : ""}`;
-  return p.stock === "low" ? "موجودی کم" : "موجود";
 }
 
 /**
  * جستجوی سراسری — از هر صفحه‌ای در دسترس است. فقط بازیابی اطلاعات؛
  * هیچ تحلیلی انجام نمی‌شود، فقط نتیجه نشان داده می‌شود.
  */
-export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" }) {
+export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" | "link" }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResults | null>(null);
@@ -88,6 +60,7 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
     const res = await addToBasketAction({ conditionId });
     if (res.ok) {
       setAdded((prev) => new Set(prev).add(conditionId));
+      window.dispatchEvent(new Event("fara:basket"));
       toast.success(`«${name}» به لیست خرید افزوده شد`, {
         action: { label: "مشاهده", onClick: () => router.push("/basket") },
       });
@@ -106,7 +79,16 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
 
   return (
     <>
-      {variant === "field" ? (
+      {variant === "link" ? (
+        <button
+          onClick={() => setOpen(true)}
+          aria-label="جستجو در همه‌چیز"
+          className="inline-flex min-h-11 items-center px-2 text-xs font-bold"
+          style={{ color: "var(--primary-dark)" }}
+        >
+          جستجو در همه‌چیز
+        </button>
+      ) : variant === "field" ? (
         <button
           onClick={() => setOpen(true)}
           aria-label="جستجوی سراسری"
@@ -194,61 +176,14 @@ export function GlobalSearch({ variant = "icon" }: { variant?: "icon" | "field" 
                     <div>
                       <div className="mb-1.5 text-[10px] font-bold" style={{ color: "var(--ink-soft)" }}>محصولات</div>
                       {results!.products.map((p) => (
-                        <div key={p.conditionId}>
-                        <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => go("/products")}
-                          className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-right transition hover:bg-[color:var(--line)]"
-                        >
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-xs font-medium" style={{ color: "var(--ink)" }}>
-                              {p.productName}
-                            </span>
-                            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px]" style={{ color: "var(--ink-soft)" }}>
-                              <span>{p.visitorName}</span>
-                              <span>{stockLabel(p)}</span>
-                              <span
-                                className={p.stale ? "rounded-md px-1.5 font-bold" : undefined}
-                                style={p.stale ? { background: "var(--warning-soft)", color: "var(--warning-ink)" } : undefined}
-                              >
-                                لیست: {ageLabel(p.ageDays)}
-                              </span>
-                            </span>
-                          </span>
-                          <span className="flex shrink-0 flex-col items-end gap-1">
-                            {p.price != null && (
-                              <span className="tnum text-[11px] font-bold" style={{ color: "var(--primary-dark)" }}>
-                                {toman(p.price)}
-                              </span>
-                            )}
-                            <TrendBadge trend={p.trend} />
-                            {p.cheapest && (
-                              <span
-                                className="rounded-full px-2 text-[10px] font-bold"
-                                style={{ background: "var(--success-soft)", color: "var(--success-ink)" }}
-                              >
-                                ارزان‌ترین
-                              </span>
-                            )}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void addToBasket(p.conditionId, p.productName)}
-                          disabled={added.has(p.conditionId)}
-                          aria-label={`افزودن ${p.productName} به لیست خرید`}
-                          className="btn-secondary shrink-0 !px-3 text-[11px] font-bold"
-                        >
-                          {added.has(p.conditionId) ? "افزوده شد" : "افزودن"}
-                        </button>
-                        </div>
-                        {(p.lastBuy || results!.terms?.[p.visitorId]) && (
-                          <div className="space-y-0.5 px-2.5 pb-1.5">
-                            <LastBuyLine lastBuy={p.lastBuy} />
-                            <TermsLine text={results!.terms?.[p.visitorId]} />
-                          </div>
-                        )}
-                        </div>
+                        <PriceHitRow
+                          key={p.conditionId}
+                          p={p}
+                          terms={results!.terms?.[p.visitorId]}
+                          added={added.has(p.conditionId)}
+                          onAdd={() => void addToBasket(p.conditionId, p.productName)}
+                          onOpen={() => go("/products")}
+                        />
                       ))}
                     </div>
                   )}
