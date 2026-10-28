@@ -46,5 +46,6 @@ export const config = {
     "/admin/:path*",
     "/settings/:path*",
     "/import-share/:path*",
+    "/more/:path*",
   ],
 };
