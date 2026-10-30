@@ -30,7 +30,6 @@ import { GET as visitorsGET } from "@/app/api/visitors/route";
 import { GET as auditGET } from "@/app/api/admin/audit/route";
 import { GET as errorsGET } from "@/app/api/admin/errors/route";
 import { recordError } from "@/lib/error-log";
-import { storage, MAX_CATALOG_BYTES, STORAGE_INFO } from "@/lib/storage";
 import { importVisitorListAction } from "@/actions/listImport";
 import { parseTable, visualToLogical } from "@/lib/list-import";
 import { POOL_REV } from "@/db/pool";
@@ -1480,41 +1479,8 @@ export async function GET(request: NextRequest) {
           return { pass, detail: pass ? "شاخص یکتای سه‌ستونه برقرار است (ورود اکسل با ON CONFLICT کار می‌کند)" : "شاخص یکتا وجود ندارد؛ مهاجرت ۰۱۷ را اجرا کنید" };
         });
 
-        // ---------- ۳۸) ذخیره‌ی فایل بزرگ در مخزن (روی همین Workers): نوشتن و خواندن بدون تغییر ----------
-        await test("۳۸) مخزن فایل: فایلِ هم‌اندازه‌ی سقف آپلود (سقف فعلی) نوشته و بدون تغییر خوانده می‌شود", async () => {
-          const key = `selftest/${stamp}.bin`;
-          const size = MAX_CATALOG_BYTES - 123; // بزرگ‌ترین فایلی که مسیر آپلود می‌پذیرد
-          const data = new Uint8Array(size);
-          for (let o = 0; o < size; o += 65536) crypto.getRandomValues(data.subarray(o, Math.min(o + 65536, size)));
-          const t0 = Date.now();
-          try {
-            await storage.put(key, data, "application/octet-stream");
-            const tw = Date.now() - t0;
-            const back = await storage.get(key);
-            const tr = Date.now() - t0 - tw;
-            const same = !!back && back.length === size && back.every((b, i) => b === data[i]);
-            const missing = (await storage.get(`selftest/none-${stamp}.bin`)) === null;
-            const pass = same && missing;
-            return { pass, detail: pass ? `فایل ${(size / 1048576).toFixed(2)} مگابایتی عیناً نوشته و خوانده شد؛ قطعه=${STORAGE_INFO.chunkBytes}B خام (${STORAGE_INFO.b64Chars} کاراکتر base64) × ${STORAGE_INFO.rowsPerInsert} ردیف در هر INSERT و ${STORAGE_INFO.stmtsPerTx} INSERT در هر تراکنش؛ خواندن ${STORAGE_INFO.readBatch} ردیف در هر کوئری؛ نوشتن ${tw}ms، خواندن ${tr}ms؛ توان نوشتن ${(size / 1048576 / (tw / 1000)).toFixed(2)}MB/s، سقف عملیِ پیشنهادی برای ≈۱۰ثانیه آپلود: ${Math.max(1, Math.floor((size / 1048576 / (tw / 1000)) * 10))}MB؛ poolRev=${POOL_REV}؛ کلید ناموجود null برگشت` : `ناموفق: same=${same} missing=${missing} chunk=${STORAGE_INFO.chunkBytes}B poolRev=${POOL_REV}` };
-          } catch (e) {
-            // تشخیص: کدام اندازه‌ی متن روی اتصال Workers می‌گذرد؟ (هر اندازه در تراکنش جدا)
-            const probe: string[] = [];
-            for (const kb of [8, 16, 24, 32, 48]) {
-              try {
-                await withSystemRole((tx) => tx.insert(catalogFileChunks).values({ fileKey: `selftest/probe-${stamp}`, part: kb, b64: "A".repeat(kb * 1024) }));
-                probe.push(`${kb}KB:ok`);
-              } catch (pe) {
-                probe.push(`${kb}KB:FAIL(${(pe instanceof Error ? pe.message : String(pe)).slice(0, 80)})`);
-              }
-            }
-            const msg = `poolRev=${POOL_REV} chunk=${STORAGE_INFO.chunkBytes}B×${STORAGE_INFO.rowsPerInsert}/INSERT، ${Date.now() - t0}ms: ${e instanceof Error ? e.message.slice(0, 160) : String(e)} | probe: ${probe.join(" ")}`;
-            await recordError("selftest/38 storage", new Error(msg));
-            return { pass: false, detail: msg };
-          } finally {
-            await storage.delete(key).catch(() => undefined);
-            await pool.query("DELETE FROM catalog_file_chunks WHERE file_key = $1 OR file_key = $2", [key, `selftest/probe-${stamp}`]);
-          }
-        });
+        // ---------- ۳۸) (برداشته شد) ذخیره‌ی فایل در مخزن ----------
+        // رابط دیگر فایل ذخیره نمی‌کند (فقط محتوای لیست خوانده می‌شود)؛ کد مخزن فایل فعلاً در پروژه می‌ماند و این آزمون غیرفعال شده است.
 
         // ---------- ۳۹) خواندن لیست (قاعده‌ها، بدون دیتابیس) ----------
         await test("۳۹) خواندن لیست: ترتیب حروف PDF، نقش ستون‌ها، ارقام فارسی، ردیف جمع، مبلغ ناهمخوان", async () => {
@@ -2733,7 +2699,7 @@ export async function GET(request: NextRequest) {
   const skipped = results.filter((r) => r.skipped).length;
   const warnings = results.filter((r) => r.warning).length + (adminProfileWarning ? 1 : 0);
   const failed = results.length - passed - skipped;
-  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 16 : stage === "search" ? 11 : stage === "basket" ? 10 : stage === "share" ? 10 : stage === "history" ? 9 : stage === "delete" ? 7 : 22;
+  const expected = stage === "old" ? 15 : stage === "new" ? 8 : stage === "app" ? 5 : stage === "sec" ? 15 : stage === "search" ? 11 : stage === "basket" ? 10 : stage === "share" ? 10 : stage === "history" ? 9 : stage === "delete" ? 7 : 22;
   const ok = !setupError && failed === 0 && results.length >= expected;
   return NextResponse.json({
     ok,
