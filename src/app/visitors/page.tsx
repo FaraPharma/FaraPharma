@@ -86,7 +86,6 @@ export default function VisitorsPage() {
   }, [selectedId]);
   const [noteText, setNoteText] = useState("");
   const [busy, setBusy] = useState(false);
-  const [catBusy, setCatBusy] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -222,35 +221,6 @@ export default function VisitorsPage() {
     else toast.error(res.error ?? "خطا");
   }
 
-  /** آپلود PDF بهعنوان فایل مرجع ساده — بدون هیچ پردازش خودکار */
-  async function uploadCatalog(file: File, quiet = false) {
-    if (!selected) return;
-    if (!/\.(pdf|xlsx|xls|csv)$/i.test(file.name)) {
-      toast.error("فقط فایل PDF یا اکسل قابل قبول است");
-      return;
-    }
-    setCatBusy(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch(`/api/visitors/${selected.id}/catalog`, {
-        method: "POST",
-        body: fd,
-      });
-      const j = await res.json().catch(() => null);
-      if (!res.ok) {
-        toast.error(j?.error ?? "خطا در آپلود فایل");
-        return;
-      }
-      if (!quiet) toast.success("فایل ذخیره شد — در فهرست فایل‌های ویزیتور در دسترس است");
-      await load();
-    } catch {
-      toast.error("ارسال فایل ناموفق بود");
-    } finally {
-      setCatBusy(false);
-    }
-  }
-
   const selectedNotes = selected ? data?.notes.filter((n) => n.visitorId === selected.id) ?? [] : [];
   const selectedConds = selected ? data?.conditions.filter((c) => c.visitorId === selected.id) ?? [] : [];
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -267,7 +237,6 @@ export default function VisitorsPage() {
         .includes(q)
     );
   }, [selectedConds, condQuery]);
-  const selectedCats = selected ? data?.catalogs.filter((c) => c.visitorId === selected.id) ?? [] : [];
 
   /**
    * ورود گروهی کالاهای این ویزیتور از اکسل:
@@ -319,8 +288,6 @@ export default function VisitorsPage() {
         const skipped =
           (res.skipped ?? 0) > 0 ? ` — ${faNum(res.skipped ?? 0)} تکراری رد شد` : "";
         toast.success(`${faNum(res.added ?? 0)} کالای جدید + شرایط ثبت شد${skipped}`);
-        // اصل فایل اکسل هم در فهرست فایل‌های ویزیتور نگه داشته شود
-        if (/\.(xlsx|xls|csv)$/i.test(file.name)) void uploadCatalog(file, true);
         load();
       } else toast.error(res.error ?? "خطا در ورود فایل");
     } catch {
@@ -679,7 +646,7 @@ export default function VisitorsPage() {
                   className="flex-1 cursor-pointer rounded-xl py-1.5 text-center text-[11px] font-bold"
                   style={{ color: "var(--ink-soft)" }}
                 >
-                  لیست از فایل (اکسل / PDF)
+                  لیست جدید از فایل
                   <input
                     type="file"
                     accept=".xlsx,.xls,.csv,.pdf,application/pdf"
@@ -799,7 +766,7 @@ export default function VisitorsPage() {
                 >
                   <p className="text-xs font-bold" style={{ color: "var(--ink)" }}>هنوز محصولی ثبت نشده</p>
                   <p className="mt-1 text-[11px]" style={{ color: "var(--ink-soft)" }}>
-                    از کادر بالا شروع کن، یا کاتالوگ کاملش را آپلود کن
+                    از کادر بالا شروع کن، یا «لیست جدید از فایل» را بزن
                   </p>
                 </div>
               ) : (
@@ -915,70 +882,13 @@ export default function VisitorsPage() {
                 file={importFile}
                 existingCount={selectedConds.length}
                 onClose={() => setImportFile(null)}
-                onSaved={(f) => {
+                onSaved={() => {
                   setImportFile(null);
                   setCondQuery("");
                   load();
-                  void uploadCatalog(f, true); // اصل فایل هم در «فایل‌های ویزیتور» بماند
                 }}
               />
             )}
-
-            {/* Catalog PDF */}
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-[color:var(--ink)]">فایل‌های ویزیتور (PDF / اکسل)</h3>
-                <label className="btn-secondary cursor-pointer px-3 py-1.5 text-xs">
-                  {catBusy ? "در حال آپلود…" : "آپلود فایل"}
-                  <input
-                    type="file"
-                    accept=".pdf,.xlsx,.xls,.csv,application/pdf"
-                    className="hidden"
-                    disabled={catBusy}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      e.currentTarget.value = "";
-                      if (f) uploadCatalog(f);
-                    }}
-                  />
-                </label>
-              </div>
-              {selectedCats.length === 0 ? (
-                <p className="rounded-xl bg-[color:var(--line)] px-3 py-2 text-center text-xs text-[color:var(--ink-soft)]">
-                  هنوز فایلی آپلود نشده — PDF یا اکسل ویزیتور را اینجا نگه دارید
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {selectedCats.map((c) => (
-                    <div key={c.id} className="rounded-xl border border-[color:var(--line)] p-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-xs font-medium text-[color:var(--ink)]">
-                            {c.fileName}
-                            <span className="ms-1 text-[10px] font-normal text-[color:var(--ink-soft)]">
-                              · {faNum(Math.round(c.sizeBytes / 1024))} کیلوبایت
-                            </span>
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                            <Badge color="green">{(c.fileName.split(".").pop() ?? "").toUpperCase()} · ذخیره‌شده</Badge>
-                            <span className="text-[10px] text-[color:var(--ink-soft)]">
-                              {faDateTime(c.createdAt)}
-                            </span>
-                          </div>
-                        </div>
-                        <a
-                          href={`/api/catalog/${c.id}/file`}
-                          className="grid size-7 shrink-0 place-items-center rounded-lg bg-[color:var(--line)] text-xs"
-                          title="مشاهده / دانلود فایل"
-                        >
-                          ⬇
-                        </a>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
 
             {/* Notes */}
             <section>
