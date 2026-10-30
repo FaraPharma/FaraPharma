@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { importVisitorListAction } from "@/actions/listImport";
 import { parsePdfPages, parseTable, type ParseResult, type PdfItem } from "@/lib/list-import";
 import { faNum } from "@/lib/format";
+import { SuccessCheck } from "@/components/success-check";
 
 // قیمت فایل‌ها بدون هیچ واحدی (ریال/تومان) نمایش داده می‌شود؛ فقط عدد با جداکننده‌ی هزارگان
 const money = (n: number) => faNum(Math.round(n).toLocaleString("en-US"));
@@ -82,9 +83,11 @@ export function ListImportDialog({
   file: File;
   existingCount: number;
   onClose: () => void;
+  /** بعد از پایان (ثبت موفق و بستن خلاصه) صدا زده می‌شود؛ فایل هیچ‌جا ذخیره نمی‌شود */
   onSaved: (file: File) => void;
 }) {
-  const [phase, setPhase] = useState<"reading" | "preview" | "saving" | "failed">("reading");
+  const [phase, setPhase] = useState<"reading" | "preview" | "saving" | "failed" | "done">("reading");
+  const [summary, setSummary] = useState<{ added: number; updated: number; markedOut: number } | null>(null);
   const [res, setRes] = useState<ParseResult | null>(null);
   const [error, setError] = useState("");
 
@@ -138,11 +141,9 @@ export function ListImportDialog({
       setPhase("preview");
       return;
     }
-    toast.success(
-      `${faNum(out.newProducts ?? 0)} کالای جدید، ${faNum(out.updated ?? 0)} به‌روزرسانی` +
-        ((out.markedOut ?? 0) > 0 ? `، ${faNum(out.markedOut ?? 0)} ناموجود شد` : "")
-    );
-    onSaved(file);
+    // خلاصه‌ی ورود داخل همین پنجره نشان داده می‌شود؛ فایل ذخیره نمی‌شود
+    setSummary({ added: out.newProducts ?? 0, updated: out.updated ?? 0, markedOut: out.markedOut ?? 0 });
+    setPhase("done");
   }
 
   const flagged = res?.rows.filter((r) => r.flags.length > 0) ?? [];
@@ -155,10 +156,10 @@ export function ListImportDialog({
       <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl p-4" style={{ background: "var(--bg, #F1F3F8)" }}>
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
-            <h2 className="text-base font-extrabold" style={{ color: "var(--ink)" }}>ورود لیست از فایل</h2>
+            <h2 className="text-base font-extrabold" style={{ color: "var(--ink)" }}>لیست جدید از فایل</h2>
             <p className="text-[11px]" style={{ color: "var(--ink-soft)" }} dir="auto">{visitorName} · {file.name}</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-xs" style={{ background: "var(--line)" }}>بستن</button>
+          <button type="button" onClick={() => (phase === "done" ? onSaved(file) : onClose())} className="rounded-lg px-2 py-1 text-xs" style={{ background: "var(--line)" }}>بستن</button>
         </div>
 
         {phase === "reading" && <p className="py-10 text-center text-xs" style={{ color: "var(--ink-soft)" }}>در حال خواندن فایل…</p>}
@@ -167,9 +168,25 @@ export function ListImportDialog({
           <div className="space-y-3 py-4 text-center">
             <p className="text-sm font-bold" style={{ color: "var(--ink)" }}>{error}</p>
             <p className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
-              فایل همین‌طور در «فایل‌های ویزیتور» نگه داشته می‌شود. ساختار فایل (بدون نام کالا و قیمت) برای بهبود تشخیص گزارش شد.
+              فایل ذخیره نشد. ساختار فایل (بدون نام کالا و قیمت) برای بهبود تشخیص گزارش شد.
             </p>
-            <button type="button" className="btn-primary w-full py-3 text-sm" onClick={() => onSaved(file)}>فقط نگه‌داری فایل</button>
+            <button type="button" className="btn-primary w-full py-3 text-sm" onClick={onClose}>بستن</button>
+          </div>
+        )}
+
+        {phase === "done" && summary && (
+          <div className="space-y-4 py-4">
+            <div className="flex justify-center">
+              <SuccessCheck size={44} />
+            </div>
+            <p className="text-center text-sm font-bold" style={{ color: "var(--ink)" }}>لیست ثبت شد</p>
+            <div className="grid grid-cols-3 gap-2 rounded-2xl p-3 text-center" style={{ background: "var(--surface, #fff)" }}>
+              <div><div className="text-xl font-extrabold">{faNum(summary.added)}</div><div className="text-[11px]" style={{ color: "var(--ink-soft)" }}>کالای جدید</div></div>
+              <div><div className="text-xl font-extrabold">{faNum(summary.updated)}</div><div className="text-[11px]" style={{ color: "var(--ink-soft)" }}>به‌روز شد</div></div>
+              <div><div className="text-xl font-extrabold">{faNum(summary.markedOut)}</div><div className="text-[11px]" style={{ color: "var(--ink-soft)" }}>ناموجود شد</div></div>
+            </div>
+            <p className="text-center text-[11px]" style={{ color: "var(--ink-soft)" }}>خود فایل ذخیره نمی‌شود؛ فقط لیست کالاها ثبت شد.</p>
+            <button type="button" className="btn-primary w-full py-3 text-sm" onClick={() => onSaved(file)}>تمام</button>
           </div>
         )}
 
@@ -225,6 +242,7 @@ export function ListImportDialog({
             </div>
 
             <p className="text-[11px]" style={{ color: "var(--ink-soft)" }}>
+              فایل فقط خوانده می‌شود و ذخیره نمی‌شود.{" "}
               {existingCount > 0
                 ? "قیمت و موجودی کالاهای مشترک به‌روز می‌شود (نسخه‌ی قبلی در تاریخچه می‌ماند). کالای ورودهای قبلی که در این فایل نیست «ناموجود» می‌شود و پاک نمی‌شود."
                 : "همه‌ی ردیف‌ها به لیست محصولات این ویزیتور اضافه می‌شود."}
